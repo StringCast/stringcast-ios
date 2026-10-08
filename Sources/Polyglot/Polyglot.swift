@@ -1,0 +1,218 @@
+import Foundation
+#if canImport(UIKit) && !os(watchOS)
+import UIKit
+#endif
+
+/// Polyglot over-the-air localization SDK.
+///
+/// ```swift
+/// Polyglot.start(projectId: "p_demo", sdkKey: "pk_demo_local", baseURL: URL(string: "http://localhost:8787")!)
+/// label.text = NSLocalizedString("welcome_title", comment: "")   // OTA value
+/// label.text = Polyglot.string("greeting", default: "Hi %@", name)
+/// ```
+public enum Polyglot {
+    /// Posted on the main thread when visible translations change (new release or language change).
+    /// `userInfo`: `"version"` (Int), `"language"` (String).
+    public static let didUpdateNotification = Notification.Name("PolyglotDidUpdateNotification")
+
+    private static let lock = NSLock()
+    private static var _engine: PolyglotEngine?
+    private static var foregroundObserver: NSObjectProtocol?
+
+    static var engine: PolyglotEngine? {
+        lock.lock(); defer { lock.unlock() }
+        return _engine
+    }
+
+    // MARK: - Start
+
+    /// Starts the SDK: loads the cache synchronously, then checks for updates in the background.
+    public static func start(
+        projectId: String,
+        sdkKey: String,
+        baseURL: URL = PolyglotConfig.defaultBaseURL,
+        languageOverride: String? = nil,
+        draftMode: Bool = PolyglotConfig.defaultDraftMode,
+        refreshInterval: TimeInterval = 15 * 60
+    ) {
+        start(PolyglotConfig(
+            projectId: projectId,
+            sdkKey: sdkKey,
+            baseURL: baseURL,
+            languageOverride: languageOverride,
+            draftMode: draftMode,
+            refreshInterval: refreshInterval
+        ))
+    }
+
+    public static func start(_ config: PolyglotConfig) {
+        Log.enabled = config.loggingEnabled
+        let sessionConfig = URLSessionConfiguration.default
+        sessionConfig.waitsForConnectivity = false
+        let engine = PolyglotEngine(
+            config: config,
+            store: DiskBundleStore(projectId: config.projectId, rootDirectory: config.cacheDirectory),
+            transport: URLSessionTransport(session: URLSession(configuration: sessionConfig)),
+            appStrings: MainBundleInterceptor.compiledString
+        )
+        install(engine)
+        if config.swizzleMainBundle { MainBundleInterceptor.install() }
+        #if canImport(UIKit) && !os(watchOS)
+        if config.refreshOnForeground { observeForeground() }
+        #endif
+        Task.detached(priority: .utility) { await engine.refresh(force: false) }
+    }
+
+    /// Installs an engine (also used by tests).
+    static func install(_ engine: PolyglotEngine?) {
+        engine?.onChange = { snapshot in
+            Observers.notify(version: snapshot.cached?.manifest.version ?? 0, language: snapshot.resolvedLanguage)
+        }
+        lock.lock()
+        let previous = _engine
+        _engine = engine
+        lock.unlock()
+        if previous != nil { Log.debug("Polyglot restarted; previous instance replaced") }
+    }
+
+    #if canImport(UIKit) && !os(watchOS)
+    private static func observeForeground() {
+        lock.lock(); defer { lock.unlock() }
+        guard foregroundObserver == nil else { return }
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil
+        ) { _ in
+            guard let engine = Polyglot.engine, engine.config.refreshOnForeground else { return }
+            Task.detached(priority: .utility) { await engine.refresh(force: false) }
+        }
+    }
+    #endif
+
+    // MARK: - Lookup
+
+    /// Localized string for `key` (resolved language → base language → app's Localizable.strings →
+    /// `default` → key), formatted with `args` after `%s`→`%@` normalisation.
+    /// A value whose placeholders don't match `args` is skipped in favour of the next source.
+    public static func string(_ key: String, default defaultValue: String? = nil, _ args: CVarArg...) -> String {
+        string(key, default: defaultValue, arguments: args)
+    }
+
+    public static func string(_ key: String, default defaultValue: String? = nil, arguments args: [CVarArg]) -> String {
+        if let engine = engine {
+            return engine.string(key, defaultValue: defaultValue, args: args)
+        }
+        if let compiled = MainBundleInterceptor.compiledString(key), let s = PolyglotEngine.formatCompiled(compiled, args: args) {
+            return s
+        }
+        if let d = defaultValue, let s = PlaceholderFormatter.format(d, args: args) { return s }
+        return key
+    }
+
+    /// Plural lookup using CLDR rules of the language the value came from.
+    /// With no `args`, `count` is used as the single format argument.
+    public static func pluralString(_ key: String, count: Int, default defaultValue: String? = nil, _ args: CVarArg...) -> String {
+        if let engine = engine {
+            return engine.pluralString(key, count: count, defaultValue: defaultValue, args: args)
+        }
+        let a: [CVarArg] = args.isEmpty ? [count] : args
+        if let compiled = MainBundleInterceptor.compiledString(key), let s = PolyglotEngine.formatCompiled(compiled, args: a) {
+            return s
+        }
+        if let d = defaultValue, let s = PlaceholderFormatter.format(d, args: a) { return s }
+        return key
+    }
+
+    /// Array value from the OTA bundles (nil if absent). Elements are also reachable as `key.0`, `key.1`, …
+    public static func stringArray(_ key: String) -> [String]? {
+        engine?.stringArray(key)
+    }
+
+    // MARK: - Control
+
+    /// Checks the manifest and downloads new bundles. `force` ignores `refreshInterval`.
+    public static func refresh(force: Bool = false) async {
+        await engine?.refresh(force: force)
+    }
+
+    /// Overrides the language (nil = follow device). Downloads the bundle lazily if needed.
+    public static func setLanguage(_ code: String?) {
+        engine?.setLanguage(code)
+    }
+
+    /// The resolved language code (as spelled by the project), or the device language before start.
+    public static var currentLanguage: String {
+        engine?.currentLanguage ?? (Locale.preferredLanguages.first ?? "en")
+    }
+
+    /// Published release version currently in use (0 = none).
+    public static var currentVersion: Int {
+        engine?.snapshot.cached?.manifest.version ?? 0
+    }
+
+    /// Languages available in the current release.
+    public static var availableLanguages: [String] {
+        engine?.snapshot.cached?.manifest.languages.map(\.code) ?? []
+    }
+
+    /// Draft mode only: uploads every key of the app's base-language Localizable.strings /
+    /// .stringsdict / .xcstrings to `/missing` (creates keys that don't exist; never overwrites).
+    @discardableResult
+    public static func uploadLocalStrings(from bundle: Bundle = .main) async throws -> UploadResult {
+        guard let engine = engine else { throw PolyglotError.notStarted }
+        guard engine.config.draftMode else { throw PolyglotError.draftModeDisabled }
+        let local = LocalStringsReader.read(bundle: bundle, fallbackLanguage: engine.baseLanguageHint)
+        Log.debug("uploading \(local.entries.count) local strings (\(local.language))")
+        guard !local.entries.isEmpty else { return UploadResult(created: 0, ignored: 0) }
+        return try await engine.upload(local.entries, language: local.language)
+    }
+
+    // MARK: - Observers
+
+    /// Registers a closure called on the main thread after each update. Keep the token and call
+    /// `cancel()` to unregister (the handler stays registered if the token is discarded).
+    @discardableResult
+    public static func addObserver(_ handler: @escaping () -> Void) -> PolyglotObservation {
+        Observers.add(handler)
+    }
+}
+
+/// Token returned by `Polyglot.addObserver(_:)`.
+public final class PolyglotObservation {
+    let id: UUID
+    init(id: UUID) { self.id = id }
+
+    public func cancel() { Observers.remove(id) }
+}
+
+enum Observers {
+    private static let lock = NSLock()
+    private static var handlers: [UUID: () -> Void] = [:]
+
+    static func add(_ handler: @escaping () -> Void) -> PolyglotObservation {
+        let id = UUID()
+        lock.lock()
+        handlers[id] = handler
+        lock.unlock()
+        return PolyglotObservation(id: id)
+    }
+
+    static func remove(_ id: UUID) {
+        lock.lock()
+        handlers[id] = nil
+        lock.unlock()
+    }
+
+    static func notify(version: Int, language: String) {
+        let deliver = {
+            lock.lock()
+            let current = Array(handlers.values)
+            lock.unlock()
+            NotificationCenter.default.post(
+                name: Polyglot.didUpdateNotification, object: nil,
+                userInfo: ["version": version, "language": language]
+            )
+            current.forEach { $0() }
+        }
+        if Thread.isMainThread { deliver() } else { DispatchQueue.main.async(execute: deliver) }
+    }
+}
