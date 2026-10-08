@@ -4,7 +4,7 @@ import Foundation
 typealias AppStringsProvider = (_ key: String) -> String?
 
 /// Core runtime. All public entry points are thread-safe; lookups take one short lock.
-final class PolyglotEngine {
+final class StringCastEngine {
     struct Snapshot {
         var cached: CachedManifest?
         var resolvedLanguage: String
@@ -12,7 +12,7 @@ final class PolyglotEngine {
         var base: TranslationBundle?
     }
 
-    let config: PolyglotConfig
+    let config: StringCastConfig
     private let store: BundleStore
     private let api: APIClient
     private let appStrings: AppStringsProvider
@@ -28,7 +28,7 @@ final class PolyglotEngine {
     private(set) var reporter: MissingKeyReporter?
 
     init(
-        config: PolyglotConfig,
+        config: StringCastConfig,
         store: BundleStore,
         transport: HTTPTransport,
         appStrings: @escaping AppStringsProvider,

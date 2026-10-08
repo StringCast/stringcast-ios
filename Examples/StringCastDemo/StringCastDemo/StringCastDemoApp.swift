@@ -1,11 +1,11 @@
-import Polyglot
+import StringCast
 import SwiftUI
 
 @main
-struct PolyglotDemoApp: App {
+struct StringCastDemoApp: App {
     init() {
         // Local backend from `backend/` (`npm run dev` + `npm run seed`).
-        Polyglot.start(PolyglotConfig(
+        StringCast.start(StringCastConfig(
             projectId: "p_demo",
             sdkKey: "pk_demo_local",
             baseURL: URL(string: "http://localhost:8787")!,

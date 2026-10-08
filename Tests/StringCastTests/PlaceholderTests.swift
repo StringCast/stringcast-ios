@@ -1,5 +1,5 @@
 import XCTest
-@testable import Polyglot
+@testable import StringCast
 
 final class PlaceholderTests: XCTestCase {
     func testNormalize() {

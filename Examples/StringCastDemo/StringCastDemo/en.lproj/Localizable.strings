@@ -1,5 +1,5 @@
 /* Demo app base strings (development language: en). */
-"welcome_title" = "Welcome to Polyglot";
+"welcome_title" = "Welcome to StringCast";
 "welcome_body" = "These strings are updated over the air. Publish a new release in the portal, then tap refresh.";
 "cta_refresh" = "Check for updates";
 "language_label" = "Language: %@";

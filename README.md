@@ -1,7 +1,7 @@
-# Polyglot iOS SDK
+# StringCast iOS SDK
 
 Over-the-air localization for iOS apps. Ship your app with its normal `Localizable.strings`, then
-update copy and add languages from the Polyglot portal. No app release needed.
+update copy and add languages from the StringCast portal. No app release needed.
 
 - Swift Package, iOS 13+ (macOS 11+ / tvOS 13+ also compile), no third-party dependencies.
 - Last-known translations load **synchronously** from disk at start, so the first screen is already localized.
@@ -13,14 +13,14 @@ Implements `docs/CONTRACT.md` §6.
 ## Install (Swift Package Manager)
 
 Xcode → *File › Add Package Dependencies…* → enter the repository URL (or *Add Local…* and pick `sdk-ios/`),
-then add the **Polyglot** library to your app target.
+then add the **StringCast** library to your app target.
 
 `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/<org>/polyglot", from: "1.0.0"),   // or .package(path: "../polyglot/sdk-ios")
+.package(url: "https://github.com/<org>/stringcast", from: "1.0.0"),   // or .package(path: "../stringcast/sdk-ios")
 ...
-.target(name: "MyApp", dependencies: [.product(name: "Polyglot", package: "polyglot")])
+.target(name: "MyApp", dependencies: [.product(name: "StringCast", package: "stringcast")])
 ```
 
 ## Start
@@ -28,9 +28,9 @@ then add the **Polyglot** library to your app target.
 Call `start` as early as possible, in `application(_:didFinishLaunchingWithOptions:)` or your SwiftUI `App.init`:
 
 ```swift
-import Polyglot
+import StringCast
 
-Polyglot.start(
+StringCast.start(
     projectId: "p_8f3k2j",
     sdkKey: "pk_…",                                   // public SDK key
     baseURL: URL(string: "https://api.example.com")!  // API origin, with or without /v1
@@ -40,7 +40,7 @@ Polyglot.start(
 Every option:
 
 ```swift
-Polyglot.start(PolyglotConfig(
+StringCast.start(StringCastConfig(
     projectId: "p_demo",
     sdkKey: "pk_demo_local",
     baseURL: URL(string: "http://localhost:8787")!,  // simulator → host machine
@@ -64,12 +64,12 @@ When working against the local backend, add this to your Info.plist so plain `ht
 
 ### What happens at runtime
 
-1. **Start**: reads `Application Support/Polyglot/<projectId>/manifest.json` and `bundles/<lang>.json` synchronously.
+1. **Start**: reads `Application Support/StringCast/<projectId>/manifest.json` and `bundles/<lang>.json` synchronously.
 2. **Background**: `GET /v1/sdk/<projectId>/manifest` with `If-None-Match`. If the release changed, the SDK downloads
    only the **resolved language** and the **base language**. Each bundle is checked against the manifest
    hash, version and language. Bundles are written atomically, then the manifest, and
-   `Polyglot.didUpdateNotification` is posted. Other languages are downloaded only when you switch to them.
-3. A manifest check is skipped if one ran less than `refreshInterval` ago. `await Polyglot.refresh(force: true)` ignores the interval.
+   `StringCast.didUpdateNotification` is posted. Other languages are downloaded only when you switch to them.
+3. A manifest check is skipped if one ran less than `refreshInterval` ago. `await StringCast.refresh(force: true)` ignores the interval.
 
 ## Looking up strings
 
@@ -79,10 +79,10 @@ label.text = NSLocalizedString("welcome_title", comment: "")
 let s = Bundle.main.localizedString(forKey: "welcome_title", value: nil, table: nil)
 
 // Explicit API (works with or without the swizzle):
-Polyglot.string("welcome_title")
-Polyglot.string("greeting", default: "Hello %@", userName)       // %s in values is converted to %@
-Polyglot.pluralString("items_count", count: n)                     // CLDR plural rules; args default to [count]
-Polyglot.stringArray("planets")                                    // ["Mercury", "Venus"]; also "planets.0", "planets.1"
+StringCast.string("welcome_title")
+StringCast.string("greeting", default: "Hello %@", userName)       // %s in values is converted to %@
+StringCast.pluralString("items_count", count: n)                     // CLDR plural rules; args default to [count]
+StringCast.stringArray("planets")                                    // ["Mercury", "Venus"]; also "planets.0", "planets.1"
 ```
 
 **Lookup order:** resolved-language bundle → base-language bundle → the app's own `Localizable.strings` /
@@ -100,11 +100,11 @@ language uses English rules. If the selected category is missing from a value, t
 ### Updates
 
 ```swift
-NotificationCenter.default.addObserver(forName: Polyglot.didUpdateNotification, object: nil, queue: .main) { _ in
+NotificationCenter.default.addObserver(forName: StringCast.didUpdateNotification, object: nil, queue: .main) { _ in
     self.reloadTexts()
 }
 // Without Combine or NotificationCenter:
-let token = Polyglot.addObserver { [weak self] in self?.reloadTexts() }   // main thread
+let token = StringCast.addObserver { [weak self] in self?.reloadTexts() }   // main thread
 token.cancel()
 ```
 
@@ -113,7 +113,7 @@ or rebuild the screen.
 
 ## Bundle.main interception (swizzling)
 
-`Polyglot.start` swaps the class of the `Bundle.main` **instance** for a private subclass using `object_setClass`.
+`StringCast.start` swaps the class of the `Bundle.main` **instance** for a private subclass using `object_setClass`.
 This is the standard approach. No other bundle is touched, and there is no global method exchange.
 
 | Lookup | OTA? |
@@ -122,11 +122,11 @@ This is the standard approach. No other bundle is touched, and there is no globa
 | Your own UIKit code that calls the above | ✅ |
 | Other tables (`InfoPlist`, `Main` storyboard tables, custom `tableName:`) | ❌ passed through untouched |
 | Storyboard / XIB text (UIKit looks it up in the *storyboard's* table, e.g. `Main.strings`) | ❌ set it in code with `NSLocalizedString` |
-| Keys whose OTA value is a **plural** | Uses the compiled `.stringsdict` (call `Polyglot.pluralString`) |
+| Keys whose OTA value is a **plural** | Uses the compiled `.stringsdict` (call `StringCast.pluralString`) |
 | `String(localized:)` / SwiftUI `Text("key")` | Usually. These go through Bundle on most iOS versions, but Apple doesn't guarantee it |
 
-Opt out with `PolyglotConfig(swizzleMainBundle: false)` and use `Polyglot.string(...)` explicitly.
-If some other library has already subclassed `Bundle.main`, Polyglot leaves it alone and logs a warning.
+Opt out with `StringCastConfig(swizzleMainBundle: false)` and use `StringCast.string(...)` explicitly.
+If some other library has already subclassed `Bundle.main`, StringCast leaves it alone and logs a warning.
 
 ## SwiftUI
 
@@ -136,26 +136,26 @@ release arrives. Use the helpers instead:
 
 ```swift
 struct WelcomeView: View {
-    @ObservedObject private var polyglot = PolyglotStore.shared   // re-renders on every update
+    @ObservedObject private var stringcast = StringCastStore.shared   // re-renders on every update
 
     var body: some View {
         VStack {
-            Text(polyglot: "welcome_title")
-            Text(polyglot: "items_count", count: items.count)
-            Text(verbatim: polyglot.string("language_label", Polyglot.currentLanguage))
-            PolyglotText("welcome_body")         // observes the store itself; usable anywhere
+            Text(stringcast: "welcome_title")
+            Text(stringcast: "items_count", count: items.count)
+            Text(verbatim: stringcast.string("language_label", StringCast.currentLanguage))
+            StringCastText("welcome_body")         // observes the store itself; usable anywhere
         }
     }
 }
 ```
 
-`PolyglotStore` is an `ObservableObject` that publishes `revision`, `language` and `version`.
+`StringCastStore` is an `ObservableObject` that publishes `revision`, `language` and `version`.
 
 ## Language resolution
 
-Contract §6.4. `Polyglot.currentLanguage` returns the result.
+Contract §6.4. `StringCast.currentLanguage` returns the result.
 
-1. `languageOverride`, or `Polyglot.setLanguage("es")`, beats everything. It is matched with the rules below. Pass `nil` to follow the device again.
+1. `languageOverride`, or `StringCast.setLanguage("es")`, beats everything. It is matched with the rules below. Pass `nil` to follow the device again.
    The override is kept in memory only. To make an in-app language picker persistent, store the choice yourself and pass it as `languageOverride`.
 2. Otherwise the SDK goes through `Locale.preferredLanguages` in order. For each one it tries:
    an exact match (`es-MX`), then language plus script (`zh-Hant-TW` → `zh-Hant`), then language only (`es`), then any
@@ -176,7 +176,7 @@ to let production clients create keys.
 - **Upload everything:**
 
   ```swift
-  let result = try await Polyglot.uploadLocalStrings()   // created / ignored counts
+  let result = try await StringCast.uploadLocalStrings()   // created / ignored counts
   ```
 
   This reads `Localizable.strings` (text or compiled), `Localizable.stringsdict` and `Localizable.xcstrings` (if
@@ -189,36 +189,36 @@ For CI, or for uploading on every build, use the CLI with the secret upload key 
 Add a **Run Script** build phase, usually limited to Debug:
 
 ```sh
-if [ "${CONFIGURATION}" = "Debug" ] && [ -n "${POLYGLOT_UPLOAD_KEY}" ]; then
-  export POLYGLOT_PROJECT_ID=p_demo
-  export POLYGLOT_BASE_URL=http://localhost:8787
-  npx polyglot push --platform ios --path "${SRCROOT}/MyApp" || echo "warning: polyglot push failed"
+if [ "${CONFIGURATION}" = "Debug" ] && [ -n "${STRINGCAST_UPLOAD_KEY}" ]; then
+  export STRINGCAST_PROJECT_ID=p_demo
+  export STRINGCAST_BASE_URL=http://localhost:8787
+  npx stringcast push --platform ios --path "${SRCROOT}/MyApp" || echo "warning: stringcast push failed"
 fi
 ```
 
-`--path` is the folder that contains your `*.lproj` directories (and/or `*.xcstrings`). Set `POLYGLOT_UPLOAD_KEY` in
+`--path` is the folder that contains your `*.lproj` directories (and/or `*.xcstrings`). Set `STRINGCAST_UPLOAD_KEY` in
 your environment or CI secrets. In Xcode 15+, either set `ENABLE_USER_SCRIPT_SANDBOXING = NO` or list the
-`.lproj` files as script inputs. `npx polyglot pull --platform ios --path …` writes translations back as
+`.lproj` files as script inputs. `npx stringcast pull --platform ios --path …` writes translations back as
 `.lproj/Localizable.strings` so they can ship as the offline fallback.
 
 ## Cache & threading
 
-- Cache location: `Application Support/Polyglot/<projectId>/` (`manifest.json` + `bundles/<lang>.json`), excluded
+- Cache location: `Application Support/StringCast/<projectId>/` (`manifest.json` + `bundles/<lang>.json`), excluded
   from iCloud backup. Writes are atomic: bundles are written first, then the manifest.
 - Lookups are callable from any thread. Each one takes a single short lock to read an immutable snapshot.
   Network work runs on Swift concurrency tasks. Notifications and observers are delivered on the main thread.
 
 ## Example app
 
-`Examples/PolyglotDemo/PolyglotDemo.xcodeproj` is a SwiftUI app (iOS 15+). It depends on this package as a local
+`Examples/StringCastDemo/StringCastDemo.xcodeproj` is a SwiftUI app (iOS 15+). It depends on this package as a local
 package and is configured for `http://localhost:8787`, `p_demo` and `pk_demo_local`.
 
 ```sh
 cd backend && npm run seed && npm run dev           # in the repo root, see docs/CONTRACT.md §5
-open sdk-ios/Examples/PolyglotDemo/PolyglotDemo.xcodeproj   # Run on an iOS Simulator
+open sdk-ios/Examples/StringCastDemo/StringCastDemo.xcodeproj   # Run on an iOS Simulator
 # or headless:
-xcodebuild -project sdk-ios/Examples/PolyglotDemo/PolyglotDemo.xcodeproj -scheme PolyglotDemo \
-  -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/polyglot-dd build
+xcodebuild -project sdk-ios/Examples/StringCastDemo/StringCastDemo.xcodeproj -scheme StringCastDemo \
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/stringcast-dd build
 ```
 
 ## Development
@@ -226,10 +226,10 @@ xcodebuild -project sdk-ios/Examples/PolyglotDemo/PolyglotDemo.xcodeproj -scheme
 ```sh
 swift build
 swift test          # 45 XCTest cases (resolution, placeholders, decoding, plurals, engine, refresh, swizzle)
-POLYGLOT_LIVE=1 swift test --filter LiveBackendTests   # read-only smoke test against localhost:8787
-xcodebuild -scheme Polyglot -destination 'generic/platform=iOS Simulator' build
+STRINGCAST_LIVE=1 swift test --filter LiveBackendTests   # read-only smoke test against localhost:8787
+xcodebuild -scheme StringCast -destination 'generic/platform=iOS Simulator' build
 ```
 
 If the checkout lives in an iCloud-synced folder (e.g. `~/Documents`), keep build products elsewhere, for example
-`swift build --scratch-path /tmp/polyglot-spm` and `xcodebuild -derivedDataPath /tmp/polyglot-dd`. Otherwise
+`swift build --scratch-path /tmp/stringcast-spm` and `xcodebuild -derivedDataPath /tmp/stringcast-dd`. Otherwise
 iCloud's extended attributes break code signing.

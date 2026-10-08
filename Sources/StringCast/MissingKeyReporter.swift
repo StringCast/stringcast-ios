@@ -13,7 +13,7 @@ final class MissingKeyReporter {
     private let api: APIClient
     private let debounce: TimeInterval
     private let context: () -> Context?
-    private let queue = DispatchQueue(label: "dev.polyglot.missing-keys")
+    private let queue = DispatchQueue(label: "dev.stringcast.missing-keys")
     private let lock = NSLock()
     private var pending: [String: TranslationValue] = [:]
     private var seen = Set<String>()

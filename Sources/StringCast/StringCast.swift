@@ -3,23 +3,23 @@ import Foundation
 import UIKit
 #endif
 
-/// Polyglot over-the-air localization SDK.
+/// StringCast over-the-air localization SDK.
 ///
 /// ```swift
-/// Polyglot.start(projectId: "p_demo", sdkKey: "pk_demo_local", baseURL: URL(string: "http://localhost:8787")!)
+/// StringCast.start(projectId: "p_demo", sdkKey: "pk_demo_local", baseURL: URL(string: "http://localhost:8787")!)
 /// label.text = NSLocalizedString("welcome_title", comment: "")   // OTA value
-/// label.text = Polyglot.string("greeting", default: "Hi %@", name)
+/// label.text = StringCast.string("greeting", default: "Hi %@", name)
 /// ```
-public enum Polyglot {
+public enum StringCast {
     /// Posted on the main thread when visible translations change (new release or language change).
     /// `userInfo`: `"version"` (Int), `"language"` (String).
-    public static let didUpdateNotification = Notification.Name("PolyglotDidUpdateNotification")
+    public static let didUpdateNotification = Notification.Name("StringCastDidUpdateNotification")
 
     private static let lock = NSLock()
-    private static var _engine: PolyglotEngine?
+    private static var _engine: StringCastEngine?
     private static var foregroundObserver: NSObjectProtocol?
 
-    static var engine: PolyglotEngine? {
+    static var engine: StringCastEngine? {
         lock.lock(); defer { lock.unlock() }
         return _engine
     }
@@ -30,12 +30,12 @@ public enum Polyglot {
     public static func start(
         projectId: String,
         sdkKey: String,
-        baseURL: URL = PolyglotConfig.defaultBaseURL,
+        baseURL: URL = StringCastConfig.defaultBaseURL,
         languageOverride: String? = nil,
-        draftMode: Bool = PolyglotConfig.defaultDraftMode,
+        draftMode: Bool = StringCastConfig.defaultDraftMode,
         refreshInterval: TimeInterval = 15 * 60
     ) {
-        start(PolyglotConfig(
+        start(StringCastConfig(
             projectId: projectId,
             sdkKey: sdkKey,
             baseURL: baseURL,
@@ -45,11 +45,11 @@ public enum Polyglot {
         ))
     }
 
-    public static func start(_ config: PolyglotConfig) {
+    public static func start(_ config: StringCastConfig) {
         Log.enabled = config.loggingEnabled
         let sessionConfig = URLSessionConfiguration.default
         sessionConfig.waitsForConnectivity = false
-        let engine = PolyglotEngine(
+        let engine = StringCastEngine(
             config: config,
             store: DiskBundleStore(projectId: config.projectId, rootDirectory: config.cacheDirectory),
             transport: URLSessionTransport(session: URLSession(configuration: sessionConfig)),
@@ -64,7 +64,7 @@ public enum Polyglot {
     }
 
     /// Installs an engine (also used by tests).
-    static func install(_ engine: PolyglotEngine?) {
+    static func install(_ engine: StringCastEngine?) {
         engine?.onChange = { snapshot in
             Observers.notify(version: snapshot.cached?.manifest.version ?? 0, language: snapshot.resolvedLanguage)
         }
@@ -72,7 +72,7 @@ public enum Polyglot {
         let previous = _engine
         _engine = engine
         lock.unlock()
-        if previous != nil { Log.debug("Polyglot restarted; previous instance replaced") }
+        if previous != nil { Log.debug("StringCast restarted; previous instance replaced") }
     }
 
     #if canImport(UIKit) && !os(watchOS)
@@ -82,7 +82,7 @@ public enum Polyglot {
         foregroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.willEnterForegroundNotification, object: nil, queue: nil
         ) { _ in
-            guard let engine = Polyglot.engine, engine.config.refreshOnForeground else { return }
+            guard let engine = StringCast.engine, engine.config.refreshOnForeground else { return }
             Task.detached(priority: .utility) { await engine.refresh(force: false) }
         }
     }
@@ -101,7 +101,7 @@ public enum Polyglot {
         if let engine = engine {
             return engine.string(key, defaultValue: defaultValue, args: args)
         }
-        if let compiled = MainBundleInterceptor.compiledString(key), let s = PolyglotEngine.formatCompiled(compiled, args: args) {
+        if let compiled = MainBundleInterceptor.compiledString(key), let s = StringCastEngine.formatCompiled(compiled, args: args) {
             return s
         }
         if let d = defaultValue, let s = PlaceholderFormatter.format(d, args: args) { return s }
@@ -115,7 +115,7 @@ public enum Polyglot {
             return engine.pluralString(key, count: count, defaultValue: defaultValue, args: args)
         }
         let a: [CVarArg] = args.isEmpty ? [count] : args
-        if let compiled = MainBundleInterceptor.compiledString(key), let s = PolyglotEngine.formatCompiled(compiled, args: a) {
+        if let compiled = MainBundleInterceptor.compiledString(key), let s = StringCastEngine.formatCompiled(compiled, args: a) {
             return s
         }
         if let d = defaultValue, let s = PlaceholderFormatter.format(d, args: a) { return s }
@@ -158,8 +158,8 @@ public enum Polyglot {
     /// .stringsdict / .xcstrings to `/missing` (creates keys that don't exist; never overwrites).
     @discardableResult
     public static func uploadLocalStrings(from bundle: Bundle = .main) async throws -> UploadResult {
-        guard let engine = engine else { throw PolyglotError.notStarted }
-        guard engine.config.draftMode else { throw PolyglotError.draftModeDisabled }
+        guard let engine = engine else { throw StringCastError.notStarted }
+        guard engine.config.draftMode else { throw StringCastError.draftModeDisabled }
         let local = LocalStringsReader.read(bundle: bundle, fallbackLanguage: engine.baseLanguageHint)
         Log.debug("uploading \(local.entries.count) local strings (\(local.language))")
         guard !local.entries.isEmpty else { return UploadResult(created: 0, ignored: 0) }
@@ -171,13 +171,13 @@ public enum Polyglot {
     /// Registers a closure called on the main thread after each update. Keep the token and call
     /// `cancel()` to unregister (the handler stays registered if the token is discarded).
     @discardableResult
-    public static func addObserver(_ handler: @escaping () -> Void) -> PolyglotObservation {
+    public static func addObserver(_ handler: @escaping () -> Void) -> StringCastObservation {
         Observers.add(handler)
     }
 }
 
-/// Token returned by `Polyglot.addObserver(_:)`.
-public final class PolyglotObservation {
+/// Token returned by `StringCast.addObserver(_:)`.
+public final class StringCastObservation {
     let id: UUID
     init(id: UUID) { self.id = id }
 
@@ -188,12 +188,12 @@ enum Observers {
     private static let lock = NSLock()
     private static var handlers: [UUID: () -> Void] = [:]
 
-    static func add(_ handler: @escaping () -> Void) -> PolyglotObservation {
+    static func add(_ handler: @escaping () -> Void) -> StringCastObservation {
         let id = UUID()
         lock.lock()
         handlers[id] = handler
         lock.unlock()
-        return PolyglotObservation(id: id)
+        return StringCastObservation(id: id)
     }
 
     static func remove(_ id: UUID) {
@@ -208,7 +208,7 @@ enum Observers {
             let current = Array(handlers.values)
             lock.unlock()
             NotificationCenter.default.post(
-                name: Polyglot.didUpdateNotification, object: nil,
+                name: StringCast.didUpdateNotification, object: nil,
                 userInfo: ["version": version, "language": language]
             )
             current.forEach { $0() }

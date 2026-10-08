@@ -41,7 +41,7 @@ final class InMemoryBundleStore: BundleStore {
     }
 }
 
-/// `Application Support/Polyglot/<projectId>/{manifest.json, bundles/<lang>.json}` with atomic writes.
+/// `Application Support/StringCast/<projectId>/{manifest.json, bundles/<lang>.json}` with atomic writes.
 final class DiskBundleStore: BundleStore {
     let directory: URL
     private let fm = FileManager.default
@@ -52,7 +52,7 @@ final class DiskBundleStore: BundleStore {
             ?? (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
         let safeId = projectId.replacingOccurrences(of: "/", with: "_")
-        directory = root.appendingPathComponent("Polyglot", isDirectory: true).appendingPathComponent(safeId, isDirectory: true)
+        directory = root.appendingPathComponent("StringCast", isDirectory: true).appendingPathComponent(safeId, isDirectory: true)
     }
 
     private var manifestURL: URL { directory.appendingPathComponent("manifest.json") }

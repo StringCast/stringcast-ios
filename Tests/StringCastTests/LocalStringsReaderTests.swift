@@ -1,5 +1,5 @@
 import XCTest
-@testable import Polyglot
+@testable import StringCast
 
 final class LocalStringsReaderTests: XCTestCase {
     func testStringsText() {
@@ -43,10 +43,10 @@ final class LocalStringsReaderTests: XCTestCase {
     }
 
     func testMainBundleInterceptorOnlyTouchesLocalizableTable() {
-        XCTAssertTrue(PolyglotMainBundle.isDefaultTable(nil))
-        XCTAssertTrue(PolyglotMainBundle.isDefaultTable(""))
-        XCTAssertTrue(PolyglotMainBundle.isDefaultTable("Localizable"))
-        XCTAssertFalse(PolyglotMainBundle.isDefaultTable("InfoPlist"))
-        XCTAssertFalse(PolyglotMainBundle.isDefaultTable("Main"))
+        XCTAssertTrue(StringCastMainBundle.isDefaultTable(nil))
+        XCTAssertTrue(StringCastMainBundle.isDefaultTable(""))
+        XCTAssertTrue(StringCastMainBundle.isDefaultTable("Localizable"))
+        XCTAssertFalse(StringCastMainBundle.isDefaultTable("InfoPlist"))
+        XCTAssertFalse(StringCastMainBundle.isDefaultTable("Main"))
     }
 }

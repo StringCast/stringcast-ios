@@ -1,5 +1,5 @@
 import XCTest
-@testable import Polyglot
+@testable import StringCast
 
 final class PluralRulesTests: XCTestCase {
     private func cats(_ lang: String, _ ns: [Int]) -> [String] {

@@ -1,5 +1,5 @@
 import XCTest
-@testable import Polyglot
+@testable import StringCast
 
 /// Scriptable transport: maps URL path → handler.
 final class MockTransport: HTTPTransport {
@@ -49,14 +49,14 @@ final class EngineTests: XCTestCase {
         transport: HTTPTransport = MockTransport(),
         draftMode: Bool = false,
         override: String? = nil
-    ) -> PolyglotEngine {
+    ) -> StringCastEngine {
         let store = store ?? InMemoryBundleStore(
             manifest: CachedManifest(manifest: manifest(), etag: "\"v3\"", lastCheck: Date()),
             bundles: [base, es]
         )
-        let config = PolyglotConfig(projectId: "p", sdkKey: "pk_test", baseURL: URL(string: "http://localhost:8787")!,
+        let config = StringCastConfig(projectId: "p", sdkKey: "pk_test", baseURL: URL(string: "http://localhost:8787")!,
                                     languageOverride: override, draftMode: draftMode, missingKeyDebounce: 0.05)
-        return PolyglotEngine(config: config, store: store, transport: transport,
+        return StringCastEngine(config: config, store: store, transport: transport,
                               appStrings: { compiled[$0] }, preferredLanguages: { preferred })
     }
 

@@ -20,7 +20,7 @@ struct URLSessionTransport: HTTPTransport {
                 } else if let http = response as? HTTPURLResponse {
                     continuation.resume(returning: (data ?? Data(), http))
                 } else {
-                    continuation.resume(throwing: PolyglotError.invalidResponse)
+                    continuation.resume(throwing: StringCastError.invalidResponse)
                 }
             }
             task.resume()
@@ -28,7 +28,7 @@ struct URLSessionTransport: HTTPTransport {
     }
 }
 
-public enum PolyglotError: Error, CustomStringConvertible {
+public enum StringCastError: Error, CustomStringConvertible {
     case invalidResponse
     case http(status: Int, body: String)
     case integrity(String)
@@ -40,7 +40,7 @@ public enum PolyglotError: Error, CustomStringConvertible {
         case .invalidResponse: return "Invalid response"
         case .http(let status, let body): return "HTTP \(status): \(body.prefix(300))"
         case .integrity(let msg): return "Integrity check failed: \(msg)"
-        case .notStarted: return "Polyglot.start(...) has not been called"
+        case .notStarted: return "StringCast.start(...) has not been called"
         case .draftModeDisabled: return "Only available in draft mode"
         }
     }
@@ -102,7 +102,7 @@ struct APIClient {
         let (data, response) = try await transport.send(r)
         if response.statusCode == 304 { return .notModified }
         guard (200..<300).contains(response.statusCode) else {
-            throw PolyglotError.http(status: response.statusCode, body: String(decoding: data, as: UTF8.self))
+            throw StringCastError.http(status: response.statusCode, body: String(decoding: data, as: UTF8.self))
         }
         let manifest = try JSONDecoder().decode(Manifest.self, from: data)
         let newEtag = response.value(forHTTPHeaderField: "ETag") ?? "\"v\(manifest.version)\""
@@ -112,7 +112,7 @@ struct APIClient {
     /// Downloads and verifies one bundle. Returns decoded bundle + raw bytes for caching.
     func fetchBundle(_ entry: Manifest.Language, expectedVersion: Int) async throws -> (TranslationBundle, Data) {
         guard let url = URL(string: entry.url, relativeTo: baseURL)?.absoluteURL else {
-            throw PolyglotError.integrity("bad bundle url \(entry.url)")
+            throw StringCastError.integrity("bad bundle url \(entry.url)")
         }
         // Bundle URLs need no key (CDN); sending it is harmless for the local backend
         // but avoid leaking it to third-party hosts.
@@ -120,17 +120,17 @@ struct APIClient {
         if url.host == baseURL.host { r.setValue(sdkKey, forHTTPHeaderField: "X-Api-Key") }
         let (data, response) = try await transport.send(r)
         guard (200..<300).contains(response.statusCode) else {
-            throw PolyglotError.http(status: response.statusCode, body: String(decoding: data, as: UTF8.self))
+            throw StringCastError.http(status: response.statusCode, body: String(decoding: data, as: UTF8.self))
         }
         if let hash = entry.hash, !Self.verify(data: data, hash: hash) {
-            throw PolyglotError.integrity("hash mismatch for \(entry.code)")
+            throw StringCastError.integrity("hash mismatch for \(entry.code)")
         }
         let bundle = try JSONDecoder().decode(TranslationBundle.self, from: data)
         guard LanguageResolver.normalize(bundle.language) == LanguageResolver.normalize(entry.code) else {
-            throw PolyglotError.integrity("bundle language \(bundle.language) != \(entry.code)")
+            throw StringCastError.integrity("bundle language \(bundle.language) != \(entry.code)")
         }
         guard bundle.version == expectedVersion else {
-            throw PolyglotError.integrity("bundle version \(bundle.version) != \(expectedVersion)")
+            throw StringCastError.integrity("bundle version \(bundle.version) != \(expectedVersion)")
         }
         return (bundle, data)
     }
@@ -141,7 +141,7 @@ struct APIClient {
         r.httpBody = try JSONEncoder().encode(payload)
         let (data, response) = try await transport.send(r)
         guard (200..<300).contains(response.statusCode) else {
-            throw PolyglotError.http(status: response.statusCode, body: String(decoding: data, as: UTF8.self))
+            throw StringCastError.http(status: response.statusCode, body: String(decoding: data, as: UTF8.self))
         }
         return (try? JSONDecoder().decode(UploadResult.self, from: data)) ?? UploadResult(created: 0, ignored: 0)
     }

@@ -1,5 +1,5 @@
 import XCTest
-@testable import Polyglot
+@testable import StringCast
 
 final class LanguageResolverTests: XCTestCase {
     let project = ["en", "es", "es-MX", "pt-BR", "zh-Hans", "zh-Hant", "fr"]

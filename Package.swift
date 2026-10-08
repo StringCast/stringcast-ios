@@ -2,17 +2,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "Polyglot",
+    name: "StringCast",
     platforms: [
         .iOS(.v13),
         .macOS(.v11),
         .tvOS(.v13),
     ],
     products: [
-        .library(name: "Polyglot", targets: ["Polyglot"]),
+        .library(name: "StringCast", targets: ["StringCast"]),
     ],
     targets: [
-        .target(name: "Polyglot", path: "Sources/Polyglot"),
-        .testTarget(name: "PolyglotTests", dependencies: ["Polyglot"], path: "Tests/PolyglotTests"),
+        .target(name: "StringCast", path: "Sources/StringCast"),
+        .testTarget(name: "StringCastTests", dependencies: ["StringCast"], path: "Tests/StringCastTests"),
     ]
 )

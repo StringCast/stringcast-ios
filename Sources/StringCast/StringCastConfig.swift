@@ -1,9 +1,9 @@
 import Foundation
 
-/// Configuration for `Polyglot.start(_:)`.
-public struct PolyglotConfig {
+/// Configuration for `StringCast.start(_:)`.
+public struct StringCastConfig {
     /// Default hosted API. Override with your deployment (e.g. `http://localhost:8787` in dev).
-    public static let defaultBaseURL = URL(string: "https://api.polyglot.dev")!
+    public static let defaultBaseURL = URL(string: "https://api.stringcast.dev")!
 
     /// Draft mode default: on in DEBUG builds of the package (SPM compiles the package with the
     /// app's configuration, so this follows the app's Debug/Release setting), never in release.
@@ -34,15 +34,15 @@ public struct PolyglotConfig {
     public var missingKeyDebounce: TimeInterval
     /// Log to the console (defaults to `draftMode`).
     public var loggingEnabled: Bool
-    /// Override the cache root (defaults to Application Support). `Polyglot/<projectId>/` is appended.
+    /// Override the cache root (defaults to Application Support). `StringCast/<projectId>/` is appended.
     public var cacheDirectory: URL?
 
     public init(
         projectId: String,
         sdkKey: String,
-        baseURL: URL = PolyglotConfig.defaultBaseURL,
+        baseURL: URL = StringCastConfig.defaultBaseURL,
         languageOverride: String? = nil,
-        draftMode: Bool = PolyglotConfig.defaultDraftMode,
+        draftMode: Bool = StringCastConfig.defaultDraftMode,
         refreshInterval: TimeInterval = 15 * 60,
         swizzleMainBundle: Bool = true,
         refreshOnForeground: Bool = true,
@@ -69,11 +69,11 @@ enum Log {
 
     static func debug(_ message: @autoclosure () -> String) {
         guard enabled else { return }
-        NSLog("[Polyglot] %@", message())
+        NSLog("[StringCast] %@", message())
     }
 
     static func warn(_ message: @autoclosure () -> String) {
-        NSLog("[Polyglot] warning: %@", message())
+        NSLog("[StringCast] warning: %@", message())
     }
 }
 
