@@ -32,8 +32,8 @@ import StringCast
 
 StringCast.start(
     projectId: "p_8f3k2j",
-    sdkKey: "pk_…",                                   // public SDK key
-    baseURL: URL(string: "https://api.example.com")!  // API origin, with or without /v1
+    sdkKey: "pk_…"                                    // public SDK key
+    // baseURL defaults to https://console.stringcast.app (API origin, with or without /v1)
 )
 ```
 
@@ -201,6 +201,24 @@ your environment or CI secrets. In Xcode 15+, either set `ENABLE_USER_SCRIPT_SAN
 `.lproj` files as script inputs. `npx stringcast pull --platform ios --path …` writes translations back as
 `.lproj/Localizable.strings` so they can ship as the offline fallback.
 
+## What the SDK sends
+
+Manifest checks (`GET /v1/sdk/{projectId}/manifest`) and draft-mode reports (`POST /v1/sdk/{projectId}/missing`) go
+to `baseURL` (default `https://console.stringcast.app`) with your public SDK key (`X-Api-Key`) and these check-in
+headers, so the portal can show which apps are connected (contract §4.2):
+
+| Header | Value |
+|---|---|
+| `X-StringCast-Platform` | `ios` |
+| `X-StringCast-App-Id` | your bundle ID (`Bundle.main.bundleIdentifier`) |
+| `X-StringCast-App-Version` | `CFBundleShortVersionString` |
+| `X-StringCast-SDK-Version` | `StringCast.sdkVersion`, e.g. `0.1.0` |
+| `X-StringCast-Language` | the language the SDK resolved for this device, e.g. `es` (omitted until known) |
+
+No device IDs (IDFA/IDFV), user identifiers or other personal data are sent. Empty values are omitted and values are
+restricted to printable ASCII. Bundle downloads (CDN URLs from the manifest) never carry check-in headers, so they stay
+cacheable; the API key is only attached to bundle URLs on the `baseURL` host (local backend).
+
 ## Cache & threading
 
 - Cache location: `Application Support/StringCast/<projectId>/` (`manifest.json` + `bundles/<lang>.json`), excluded
@@ -225,7 +243,7 @@ xcodebuild -project sdk-ios/Examples/StringCastDemo/StringCastDemo.xcodeproj -sc
 
 ```sh
 swift build
-swift test          # 45 XCTest cases (resolution, placeholders, decoding, plurals, engine, refresh, swizzle)
+swift test          # 49 XCTest cases (resolution, placeholders, decoding, plurals, engine, refresh, swizzle, check-in headers)
 STRINGCAST_LIVE=1 swift test --filter LiveBackendTests   # read-only smoke test against localhost:8787
 xcodebuild -scheme StringCast -destination 'generic/platform=iOS Simulator' build
 ```

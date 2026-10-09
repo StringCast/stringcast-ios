@@ -2,8 +2,8 @@ import Foundation
 
 /// Configuration for `StringCast.start(_:)`.
 public struct StringCastConfig {
-    /// Default hosted API. Override with your deployment (e.g. `http://localhost:8787` in dev).
-    public static let defaultBaseURL = URL(string: "https://api.stringcast.dev")!
+    /// Default hosted API (`https://console.stringcast.app`). Override for local dev (e.g. `http://localhost:8787`).
+    public static let defaultBaseURL = URL(string: "https://console.stringcast.app")!
 
     /// Draft mode default: on in DEBUG builds of the package (SPM compiles the package with the
     /// app's configuration, so this follows the app's Debug/Release setting), never in release.

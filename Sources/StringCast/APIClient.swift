@@ -77,6 +77,9 @@ struct APIClient {
     let projectId: String
     let sdkKey: String
     let transport: HTTPTransport
+    /// Check-in headers (contract §4.2) for API requests (`/manifest`, `/missing`); evaluated per request.
+    /// Never applied to bundle downloads.
+    var checkInHeaders: () -> [String: String] = { [:] }
     static let timeout: TimeInterval = 20
 
     /// `<base>/v1/sdk/<projectId>/<path>`; tolerates a base URL that already ends in `/v1`.
@@ -93,6 +96,7 @@ struct APIClient {
         r.httpMethod = method
         r.setValue(sdkKey, forHTTPHeaderField: "X-Api-Key")
         r.setValue("application/json", forHTTPHeaderField: "Accept")
+        for (name, value) in checkInHeaders() { r.setValue(value, forHTTPHeaderField: name) }
         return r
     }
 
@@ -114,10 +118,8 @@ struct APIClient {
         guard let url = URL(string: entry.url, relativeTo: baseURL)?.absoluteURL else {
             throw StringCastError.integrity("bad bundle url \(entry.url)")
         }
-        // Bundle URLs need no key (CDN); sending it is harmless for the local backend
-        // but avoid leaking it to third-party hosts.
-        var r = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: Self.timeout)
-        if url.host == baseURL.host { r.setValue(sdkKey, forHTTPHeaderField: "X-Api-Key") }
+        // Bundles are public, immutable CDN files: no key or check-in headers, so they cache cleanly.
+        let r = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: Self.timeout)
         let (data, response) = try await transport.send(r)
         guard (200..<300).contains(response.statusCode) else {
             throw StringCastError.http(status: response.statusCode, body: String(decoding: data, as: UTF8.self))

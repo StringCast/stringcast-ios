@@ -9,6 +9,7 @@ struct StringCastDemoApp: App {
             projectId: "p_demo",
             sdkKey: "pk_demo_local",
             baseURL: URL(string: "http://localhost:8787")!,
+            // baseURL: URL(string: "https://console.stringcast.app")!, // production (also the default if omitted)
             refreshInterval: 60
         ))
     }

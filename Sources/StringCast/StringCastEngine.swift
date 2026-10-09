@@ -14,7 +14,8 @@ final class StringCastEngine {
 
     let config: StringCastConfig
     private let store: BundleStore
-    private let api: APIClient
+    private var api: APIClient
+    private let appInfo: CheckInHeaders.AppInfo
     private let appStrings: AppStringsProvider
     private let preferredLanguages: () -> [String]
     private let now: () -> Date
@@ -33,7 +34,8 @@ final class StringCastEngine {
         transport: HTTPTransport,
         appStrings: @escaping AppStringsProvider,
         preferredLanguages: @escaping () -> [String] = { Locale.preferredLanguages },
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        appInfo: CheckInHeaders.AppInfo = .from(.main)
     ) {
         self.config = config
         self.store = store
@@ -42,7 +44,10 @@ final class StringCastEngine {
         self.preferredLanguages = preferredLanguages
         self.now = now
         self.languageOverride = config.languageOverride
+        self.appInfo = appInfo
         self.state = Snapshot(cached: nil, resolvedLanguage: config.languageOverride ?? preferredLanguages().first ?? "en")
+        let fallbackHeaders = CheckInHeaders.build(app: appInfo, language: nil)
+        self.api.checkInHeaders = { [weak self] in self?.checkInHeaders() ?? fallbackHeaders }
         loadFromCache()
         if config.draftMode {
             reporter = MissingKeyReporter(api: api, debounce: config.missingKeyDebounce) { [weak self] in
@@ -109,6 +114,19 @@ final class StringCastEngine {
             || old.base != new.base
         if changed { onChange?(new) }
         return changed
+    }
+
+    /// Check-in headers for the next API request. The language is resolved now (§6.4, honouring
+    /// `languageOverride` / `setLanguage`); before any manifest is known only an override counts.
+    func checkInHeaders() -> [String: String] {
+        let (manifest, override) = lock.locked { (state.cached?.manifest, languageOverride) }
+        let language: String?
+        if manifest != nil {
+            language = resolve(manifest, override: override)
+        } else {
+            language = override.flatMap { $0.isEmpty ? nil : $0 }
+        }
+        return CheckInHeaders.build(app: appInfo, language: language)
     }
 
     func setLanguage(_ code: String?) {
