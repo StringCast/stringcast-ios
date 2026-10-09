@@ -18,10 +18,13 @@ then add the **StringCast** library to your app target.
 `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/<org>/stringcast", from: "1.0.0"),   // or .package(path: "../stringcast/sdk-ios")
+.package(path: "../stringcast/sdk-ios"),   // the StringCast repo checked out next to your app
 ...
-.target(name: "MyApp", dependencies: [.product(name: "StringCast", package: "stringcast")])
+.target(name: "MyApp", dependencies: [.product(name: "StringCast", package: "sdk-ios")])
 ```
+
+A local package's identity is its folder name (`sdk-ios`). A Swift Package Manager release with a stable
+repository URL is coming soon.
 
 ## Start
 
