@@ -8,23 +8,20 @@ update copy and add languages from the StringCast portal. No app release needed.
 - `NSLocalizedString` / `Bundle.main.localizedString` return OTA values automatically. You can opt out of this.
 - Network or parse errors are logged and swallowed. Nothing in the SDK should crash the host app.
 
-Implements `docs/CONTRACT.md` §6.
+Full guide: https://console.stringcast.app/docs/ios
 
 ## Install (Swift Package Manager)
 
-Xcode → *File › Add Package Dependencies…* → enter the repository URL (or *Add Local…* and pick `sdk-ios/`),
-then add the **StringCast** library to your app target.
+Xcode → *File › Add Package Dependencies…* → enter `https://github.com/stringcast/stringcast-ios`,
+choose *Up to Next Major Version* from `0.1.0`, then add the **StringCast** library to your app target.
 
 `Package.swift`:
 
 ```swift
-.package(path: "../stringcast/sdk-ios"),   // the StringCast repo checked out next to your app
+.package(url: "https://github.com/stringcast/stringcast-ios", from: "0.1.0"),
 ...
-.target(name: "MyApp", dependencies: [.product(name: "StringCast", package: "sdk-ios")])
+.target(name: "MyApp", dependencies: [.product(name: "StringCast", package: "stringcast-ios")])
 ```
-
-A local package's identity is its folder name (`sdk-ios`). A Swift Package Manager release with a stable
-repository URL is coming soon.
 
 ## Start
 
@@ -235,10 +232,10 @@ cacheable; the API key is only attached to bundle URLs on the `baseURL` host (lo
 package and is configured for `http://localhost:8787`, `p_demo` and `pk_demo_local`.
 
 ```sh
-cd backend && npm run seed && npm run dev           # in the repo root, see docs/CONTRACT.md §5
-open sdk-ios/Examples/StringCastDemo/StringCastDemo.xcodeproj   # Run on an iOS Simulator
+# Point StringCastDemoApp.swift at https://console.stringcast.app and your own project/SDK key, then:
+open Examples/StringCastDemo/StringCastDemo.xcodeproj   # Run on an iOS Simulator
 # or headless:
-xcodebuild -project sdk-ios/Examples/StringCastDemo/StringCastDemo.xcodeproj -scheme StringCastDemo \
+xcodebuild -project Examples/StringCastDemo/StringCastDemo.xcodeproj -scheme StringCastDemo \
   -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/stringcast-dd build
 ```
 
