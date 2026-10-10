@@ -5,15 +5,16 @@ public struct StringCastConfig {
     /// Default hosted API (`https://console.stringcast.app`). Override for local dev (e.g. `http://localhost:8787`).
     public static let defaultBaseURL = URL(string: "https://console.stringcast.app")!
 
-    /// Draft mode default: on in DEBUG builds of the package (SPM compiles the package with the
-    /// app's configuration, so this follows the app's Debug/Release setting), never in release.
-    public static var defaultDraftMode: Bool {
-        #if DEBUG
-        return true
-        #else
-        return false
-        #endif
-    }
+    /// Draft mode default, decided **at runtime** from how the app was installed (not from `#if DEBUG`,
+    /// which Xcode evaluates without `DEBUG` for packages built in custom configurations such as QA/CI):
+    ///
+    /// - `true` in the iOS Simulator,
+    /// - `true` when the app contains `embedded.mobileprovision` (development, ad-hoc and enterprise builds),
+    /// - `true` for TestFlight installs (`appStoreReceiptURL` ends in `sandboxReceipt`),
+    /// - `false` otherwise, i.e. **App Store installs are never in draft mode by default**.
+    ///
+    /// Pass `draftMode:` explicitly to override (e.g. `false` for an ad-hoc build handed to customers).
+    public static var defaultDraftMode: Bool { DraftModeDetector.isDraftMode(.current) }
 
     public var projectId: String
     /// Public SDK key (`pk_…`).
@@ -26,7 +27,11 @@ public struct StringCastConfig {
     public var draftMode: Bool
     /// Minimum seconds between manifest checks (default 15 min). `refresh(force: true)` ignores it.
     public var refreshInterval: TimeInterval
-    /// Swap `Bundle.main`'s class so `NSLocalizedString` & co. return OTA values.
+    /// Intercept `-[NSBundle localizedStringForKey:value:table:]` so `NSLocalizedString`,
+    /// `Bundle.localizedString(forKey:value:table:)` & co. return OTA values. Since 0.1.2 this covers
+    /// **every bundle inside the app** (`Bundle.main`, Swift-package resource bundles, embedded
+    /// frameworks) and every table, not only `Bundle.main`'s `Localizable`. System bundles are untouched.
+    /// The name is kept for source compatibility.
     public var swizzleMainBundle: Bool
     /// Check for updates when the app returns to the foreground (honours `refreshInterval`).
     public var refreshOnForeground: Bool
@@ -37,7 +42,8 @@ public struct StringCastConfig {
     /// Override the cache root (defaults to Application Support). `StringCast/<projectId>/` is appended.
     public var cacheDirectory: URL?
     /// Draft mode only: once per app build (version + build number + SDK version), upload every key of
-    /// `Bundle.main`'s `Localizable` table plus the existing translations of each project language.
+    /// every table of every app bundle (`Bundle.main`, Swift-package resource bundles, embedded
+    /// frameworks) plus the existing translations of each project language.
     public var autoUploadLocalStrings: Bool
     /// Keys never uploaded or reported as missing (e.g. debug-only or generated keys).
     public var excludedKeys: Set<String>
@@ -81,8 +87,14 @@ enum Log {
         NSLog("[StringCast] %@", message())
     }
 
+    /// Always printed (problems the integrator must see even with logging off).
     static func warn(_ message: @autoclosure () -> String) {
         NSLog("[StringCast] warning: %@", message())
+    }
+
+    /// Always printed. Reserved for rare, one-off facts (e.g. the once-per-build upload summary).
+    static func notice(_ message: @autoclosure () -> String) {
+        NSLog("[StringCast] %@", message())
     }
 }
 
@@ -92,5 +104,38 @@ extension NSLock {
     func locked<T>(_ body: () throws -> T) rethrows -> T {
         lock(); defer { unlock() }
         return try body()
+    }
+}
+
+/// Runtime heuristic behind `StringCastConfig.defaultDraftMode`. The probes are injectable for tests.
+enum DraftModeDetector {
+    struct Environment: Equatable {
+        /// Running in the iOS/tvOS Simulator.
+        var isSimulator: Bool
+        /// The app bundle contains `embedded.mobileprovision` (development, ad-hoc, enterprise).
+        var hasEmbeddedProvisioningProfile: Bool
+        /// `Bundle.main.appStoreReceiptURL?.lastPathComponent` (`sandboxReceipt` on TestFlight).
+        var receiptName: String?
+
+        static var current: Environment {
+            Environment(
+                isSimulator: isSimulatorBuild,
+                hasEmbeddedProvisioningProfile: Bundle.main.path(forResource: "embedded", ofType: "mobileprovision") != nil,
+                receiptName: Bundle.main.appStoreReceiptURL?.lastPathComponent
+            )
+        }
+    }
+
+    /// `targetEnvironment` is about the architecture the package is compiled for, so it is correct inside packages.
+    static var isSimulatorBuild: Bool {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    static func isDraftMode(_ env: Environment) -> Bool {
+        env.isSimulator || env.hasEmbeddedProvisioningProfile || env.receiptName == "sandboxReceipt"
     }
 }

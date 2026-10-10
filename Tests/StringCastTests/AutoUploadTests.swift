@@ -5,10 +5,35 @@ import XCTest
 /// `Bundle`'s per-path caching never leaks between tests).
 final class FixtureBundle {
     let url: URL
+    private let owned: Bool
 
     init(developmentRegion: String? = "en", version: String = "1.2", build: String = "34") throws {
         url = FileManager.default.temporaryDirectory
             .appendingPathComponent("StringCastFixture-\(UUID().uuidString).bundle", isDirectory: true)
+        owned = true
+        try Self.create(url, developmentRegion: developmentRegion, version: version, build: build)
+    }
+
+    /// A bundle at a given location (e.g. inside another fixture). Removed only with its owner.
+    init(at url: URL, developmentRegion: String? = "en", owned: Bool = false, infoPlist: Bool = true) throws {
+        self.url = url
+        self.owned = owned
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        if infoPlist { try Self.create(url, developmentRegion: developmentRegion, version: "1.0", build: "1") }
+    }
+
+    /// A temp directory holding `<name>` (e.g. `Demo.app`), so the app folder keeps a realistic name.
+    static func app(_ name: String = "Demo.app", version: String = "1.0", build: String = "1") throws -> FixtureBundle {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("StringCastApp-\(UUID().uuidString)", isDirectory: true)
+        let f = try FixtureBundle(at: dir.appendingPathComponent(name, isDirectory: true), owned: true)
+        try create(f.url, developmentRegion: "en", version: version, build: build)
+        f.cleanup = dir
+        return f
+    }
+
+    private var cleanup: URL?
+
+    private static func create(_ url: URL, developmentRegion: String?, version: String, build: String) throws {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         var info: [String: Any] = ["CFBundleIdentifier": "app.stringcast.fixture",
                                    "CFBundleShortVersionString": version, "CFBundleVersion": build]
@@ -17,14 +42,37 @@ final class FixtureBundle {
             .write(to: url.appendingPathComponent("Info.plist"))
     }
 
-    deinit { try? FileManager.default.removeItem(at: url) }
+    deinit {
+        guard owned else { return }
+        try? FileManager.default.removeItem(at: cleanup ?? url)
+    }
+
+    /// A child bundle at `relativePath` (e.g. `Frameworks/Kit.framework`).
+    func nested(_ relativePath: String, developmentRegion: String? = "en", infoPlist: Bool = true) throws -> FixtureBundle {
+        try FixtureBundle(at: url.appendingPathComponent(relativePath, isDirectory: true),
+                          developmentRegion: developmentRegion, infoPlist: infoPlist)
+    }
 
     var bundle: Bundle { Bundle(url: url)! }
 
-    private func dir(_ lproj: String) throws -> URL {
+    private func dir(_ lproj: String?) throws -> URL {
+        guard let lproj = lproj else { return url }
         let d = url.appendingPathComponent("\(lproj).lproj", isDirectory: true)
         try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
+    }
+
+    /// Text `.strings` file for any table (`lproj` nil = unlocalized, at the bundle root).
+    func table(_ lproj: String?, _ name: String, _ values: [String: String]) throws {
+        let text = values.sorted { $0.key < $1.key }
+            .map { "\"\(escape($0.key))\" = \"\(escape($0.value))\";" }.joined(separator: "\n")
+        try Data(text.utf8).write(to: dir(lproj).appendingPathComponent("\(name).strings"))
+    }
+
+    /// A compiled storyboard (`Base.lproj/<name>.storyboardc`) — its tables are UI tables.
+    func storyboard(_ name: String, lproj: String? = "Base") throws {
+        try FileManager.default.createDirectory(at: dir(lproj).appendingPathComponent("\(name).storyboardc"),
+                                                withIntermediateDirectories: true)
     }
 
     /// Text `.strings` (what Xcode copies when `STRINGS_FILE_OUTPUT_ENCODING` is UTF-8).
@@ -50,9 +98,10 @@ final class FixtureBundle {
             .write(to: dir(lproj).appendingPathComponent("Localizable.stringsdict"))
     }
 
-    /// A table other than Localizable must never be uploaded.
-    func otherTable(_ lproj: String) throws {
-        try Data("\"storyboard.title\" = \"Nope\";".utf8).write(to: dir(lproj).appendingPathComponent("Main.strings"))
+    /// A storyboard table (`Main.strings` next to `Base.lproj/Main.storyboardc`): never uploaded.
+    func storyboardTable(_ lproj: String) throws {
+        try storyboard("Main")
+        try Data("\"8Fh-2k-3dx.text\" = \"Nope\";".utf8).write(to: dir(lproj).appendingPathComponent("Main.strings"))
     }
 
     private func escape(_ s: String) -> String {
@@ -142,7 +191,8 @@ final class AutoUploadTests: XCTestCase {
         try f.stringsDict("es", key: "items", one: "%d artículo", other: "%d artículos")
         try f.strings("zh-Hans", ["hello": "你好"])
         try f.strings("de", ["hello": "Hallo"])   // not a project language
-        try f.otherTable("en")
+        try f.storyboardTable("en")
+        try f.table("en", "InfoPlist", ["CFBundleDisplayName": "Nope"])
 
         let units = LocalStringsReader.collect(bundle: f.bundle, baseLanguage: "en",
                                                languages: ["en", "es-MX", "zh-Hans", "fr", "en-GB"])

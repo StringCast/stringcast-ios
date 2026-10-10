@@ -53,10 +53,10 @@ public enum StringCast {
             config: config,
             store: DiskBundleStore(projectId: config.projectId, rootDirectory: config.cacheDirectory),
             transport: URLSessionTransport(session: URLSession(configuration: sessionConfig)),
-            appStrings: MainBundleInterceptor.compiledString
+            appStrings: BundleInterceptor.compiledString
         )
         install(engine)
-        if config.swizzleMainBundle { MainBundleInterceptor.install() }
+        if config.swizzleMainBundle { BundleInterceptor.install() } else { BundleInterceptor.disable() }
         #if canImport(UIKit) && !os(watchOS)
         if config.refreshOnForeground { observeForeground() }
         #endif
@@ -93,7 +93,7 @@ public enum StringCast {
 
     // MARK: - Lookup
 
-    /// Localized string for `key` (resolved language → base language → app's Localizable.strings →
+    /// Localized string for `key` (resolved language → base language → `Bundle.main`'s Localizable table →
     /// `default` → key), formatted with `args` after `%s`→`%@` normalisation.
     /// A value whose placeholders don't match `args` is skipped in favour of the next source.
     public static func string(_ key: String, default defaultValue: String? = nil, _ args: CVarArg...) -> String {
@@ -104,7 +104,7 @@ public enum StringCast {
         if let engine = engine {
             return engine.string(key, defaultValue: defaultValue, args: args)
         }
-        if let compiled = MainBundleInterceptor.compiledString(key), let s = StringCastEngine.formatCompiled(compiled, args: args) {
+        if let compiled = BundleInterceptor.compiledString(key), let s = StringCastEngine.formatCompiled(compiled, args: args) {
             return s
         }
         if let d = defaultValue, let s = PlaceholderFormatter.format(d, args: args) { return s }
@@ -118,7 +118,7 @@ public enum StringCast {
             return engine.pluralString(key, count: count, defaultValue: defaultValue, args: args)
         }
         let a: [CVarArg] = args.isEmpty ? [count] : args
-        if let compiled = MainBundleInterceptor.compiledString(key), let s = StringCastEngine.formatCompiled(compiled, args: a) {
+        if let compiled = BundleInterceptor.compiledString(key), let s = StringCastEngine.formatCompiled(compiled, args: a) {
             return s
         }
         if let d = defaultValue, let s = PlaceholderFormatter.format(d, args: a) { return s }
@@ -157,10 +157,13 @@ public enum StringCast {
         engine?.snapshot.cached?.manifest.languages.map(\.code) ?? []
     }
 
-    /// Draft mode only: uploads every key of `bundle`'s `Localizable` table (`.strings`, `.stringsdict`,
-    /// compiled String Catalog) as the project's base language, plus the values of every other project
-    /// language found in a matching `.lproj` (`es-MX` → `es-MX.lproj`, else `es.lproj`), one language per
-    /// request in batches of 500. The server creates missing keys and fills empty values; it never
+    /// Draft mode only: uploads every key of every table (`.strings`, `.stringsdict`, compiled String
+    /// Catalogs; not `InfoPlist` or storyboard/XIB tables) of `bundle` **and of every bundle inside it**
+    /// (Swift-package resource bundles, `Frameworks/*.framework`, `X.framework/Y.bundle`) as the project's
+    /// base language, plus the values of every other project language found in a matching `.lproj`
+    /// (`es-MX` → `es-MX.lproj`, else `es.lproj`), one language per request in batches of 500. Keys share
+    /// one namespace: the first occurrence wins (main bundle `Localizable`, its other tables, then the
+    /// other bundles alphabetically). The server creates missing keys and fills empty values; it never
     /// overwrites. Runs regardless of the once-per-build marker used by the automatic upload.
     /// Returns the counts summed over all requests.
     @discardableResult

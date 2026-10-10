@@ -1,3 +1,4 @@
+import DemoFeature
 import StringCast
 import SwiftUI
 
@@ -20,6 +21,13 @@ struct ContentView: View {
 
                 Section(header: Text(verbatim: "NSLocalizedString (intercepted Bundle.main)")) {
                     Text(verbatim: NSLocalizedString("welcome_title", comment: ""))
+                }
+
+                Section(header: Text(verbatim: "Swift package bundle (\(DemoFeature.bundleName), table Feature)")) {
+                    // `stringcast.revision` makes this section re-render when a release arrives.
+                    let _ = stringcast.revision
+                    Text(verbatim: DemoFeature.title()).font(.headline)
+                    Text(verbatim: DemoFeature.body())
                 }
 
                 Section(header: Text(verbatim: "Plurals")) {

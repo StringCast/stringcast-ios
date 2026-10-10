@@ -1,0 +1,5 @@
+/* Feature screen title */
+"feature_title" = "Feature title (compiled, en)";
+
+/* Feature screen body */
+"feature_body" = "This text lives in the DemoFeature package's Feature table.";

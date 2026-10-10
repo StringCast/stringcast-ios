@@ -42,11 +42,9 @@ final class LocalStringsReaderTests: XCTestCase {
         XCTAssertEqual(r.entries["files"], .plural(["one": "%lld file", "other": "%lld files"]))
     }
 
-    func testMainBundleInterceptorOnlyTouchesLocalizableTable() {
-        XCTAssertTrue(StringCastMainBundle.isDefaultTable(nil))
-        XCTAssertTrue(StringCastMainBundle.isDefaultTable(""))
-        XCTAssertTrue(StringCastMainBundle.isDefaultTable("Localizable"))
-        XCTAssertFalse(StringCastMainBundle.isDefaultTable("InfoPlist"))
-        XCTAssertFalse(StringCastMainBundle.isDefaultTable("Main"))
+    func testTableNameNormalisation() {
+        XCTAssertEqual(BundleInterceptor.tableName(nil), "Localizable")
+        XCTAssertEqual(BundleInterceptor.tableName(""), "Localizable")
+        XCTAssertEqual(BundleInterceptor.tableName("Feature"), "Feature")
     }
 }

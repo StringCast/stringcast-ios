@@ -1,6 +1,6 @@
 import Foundation
 
-/// Reads the app's base-language `Localizable.strings` / `.stringsdict` / `.xcstrings`.
+/// Reads the app's `.strings` / `.stringsdict` / `.xcstrings` tables (every table of every app bundle).
 enum LocalStringsReader {
     struct Result {
         var language: String
@@ -125,6 +125,8 @@ extension LocalStringsReader {
         /// The `.lproj` folder the values came from (nil = unlocalized resources / String Catalog).
         var source: String?
         var entries: [String: TranslationValue]
+        /// Bundle/table breakdown of `entries` (for logs).
+        var origins: [TableOrigin] = []
     }
 
     /// `*.lproj` folders of `bundle` (name without extension → URL). Read from disk, so it works for any
@@ -167,15 +169,13 @@ extension LocalStringsReader {
         return find(lang)
     }
 
-    /// `Localizable.strings` + `Localizable.stringsdict` of one folder (stringsdict wins on conflicts).
-    static func readTable(in directory: URL) -> [String: TranslationValue] {
+    /// `<table>.strings` + `<table>.stringsdict` of one folder (stringsdict wins on conflicts).
+    static func readTable(_ table: String = "Localizable", in directory: URL) -> [String: TranslationValue] {
         var entries: [String: TranslationValue] = [:]
-        let strings = directory.appendingPathComponent("Localizable.strings")
-        if let dict = NSDictionary(contentsOf: strings) as? [String: Any] {
+        if let dict = NSDictionary(contentsOf: directory.appendingPathComponent("\(table).strings")) as? [String: Any] {
             entries.merge(parseStrings(dict)) { _, new in new }
         }
-        let stringsDict = directory.appendingPathComponent("Localizable.stringsdict")
-        if let dict = NSDictionary(contentsOf: stringsDict) as? [String: Any] {
+        if let dict = NSDictionary(contentsOf: directory.appendingPathComponent("\(table).stringsdict")) as? [String: Any] {
             entries.merge(parseStringsDict(dict)) { _, new in new }
         }
         return entries
@@ -205,59 +205,188 @@ extension LocalStringsReader {
         return out
     }
 
-    /// Everything to upload from `bundle`'s `Localizable` table: the base values (sent as `baseLanguage`)
-    /// followed by each other project language that has a matching `.lproj`.
-    ///
-    /// Base folder: the `.lproj` matching `baseLanguage`, else the development region's, else `Base.lproj`,
-    /// else unlocalized resources (each file type falls back to `Base.lproj` / unlocalized like `read`).
-    /// A translation folder that resolves to the base folder (e.g. `en-GB` → `en.lproj`) is skipped.
-    static func collect(bundle: Bundle, baseLanguage: String, languages: [String]) -> [LanguageEntries] {
-        let dirs = lprojDirectories(in: bundle)
-        let names = dirs.keys.sorted()
+    // MARK: Tables
+
+    /// Tables never uploaded nor intercepted: `InfoPlist` (read by the system, out of process, so OTA
+    /// values could never apply). Storyboard / XIB tables are skipped too (see `uiTables`).
+    static let excludedTables: Set<String> = ["InfoPlist"]
+
+    static let tableExtensions: Set<String> = ["strings", "stringsdict", "xcstrings"]
+
+    /// The localizable tables of one bundle.
+    struct BundleTables: Equatable {
+        /// Resource folder (`resourceURL`, else the bundle folder).
+        var root: URL
+        /// `.lproj` folders by name (without extension).
+        var lprojs: [String: URL]
+        /// Table names, `Localizable` first, then alphabetical. Excludes `excludedTables` and `uiTables`.
+        var tables: [String]
+        /// Tables that belong to a storyboard or XIB (`Main.storyboardc` → `Main`): UIKit resolves their
+        /// keys (`8Fh-2k-3dx.text`) itself, so they are neither uploaded nor intercepted.
+        var uiTables: Set<String>
+    }
+
+    /// Scans `bundle` on disk (not through `Bundle`'s caches) for its tables.
+    static func tables(in bundle: Bundle) -> BundleTables {
+        let fm = FileManager.default
         let root = bundle.resourceURL ?? bundle.bundleURL
-        let devRegion = bundle.developmentLocalization.flatMap { $0 == "Base" ? nil : $0 }
-        let baseName = matchLproj(baseLanguage, in: names)
-            ?? devRegion.flatMap { matchLproj($0, in: names) }
-            ?? names.first { $0.caseInsensitiveCompare("Base") == .orderedSame }
-
-        let catalogData = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil))?
-            .first { $0.lastPathComponent == "Localizable.xcstrings" }
-            .flatMap { try? Data(contentsOf: $0) }
-
-        // Base values.
-        var base: [String: TranslationValue] = [:]
-        if let data = catalogData {
-            base.merge(parseXCStrings(data, language: baseLanguage).entries) { _, new in new }
-        }
-        let baseDirs = [baseName.flatMap { dirs[$0] }, names.first { $0.caseInsensitiveCompare("Base") == .orderedSame }.flatMap { dirs[$0] }, root]
-            .compactMap { $0 }
-        for file in ["Localizable.strings", "Localizable.stringsdict"] {
-            guard let dir = baseDirs.first(where: { FileManager.default.fileExists(atPath: $0.appendingPathComponent(file).path) }) else { continue }
-            let url = dir.appendingPathComponent(file)
-            guard let dict = NSDictionary(contentsOf: url) as? [String: Any] else { continue }
-            base.merge(file.hasSuffix("dict") ? parseStringsDict(dict) : parseStrings(dict)) { _, new in new }
-        }
-        var result = [LanguageEntries(language: baseLanguage, source: baseName, entries: base)]
-
-        // Existing translations.
-        let baseNormalized = LanguageResolver.normalize(baseLanguage)
-        var seen = Set([baseNormalized])
-        for language in languages {
-            let n = LanguageResolver.normalize(language)
-            guard seen.insert(n).inserted else { continue }
-            var entries: [String: TranslationValue] = [:]
-            var source: String?
-            if let data = catalogData {
-                entries.merge(parseXCStrings(data, localization: language)) { _, new in new }
+        let lprojs = lprojDirectories(in: bundle)
+        var names = Set<String>()
+        var ui = Set<String>()
+        for dir in [root] + lprojs.keys.sorted().compactMap({ lprojs[$0] }) {
+            for url in (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] {
+                let ext = url.pathExtension.lowercased()
+                let name = url.deletingPathExtension().lastPathComponent
+                if tableExtensions.contains(ext) { names.insert(name) }
+                if ext == "storyboardc" || ext == "nib" || ext == "xib" || ext == "storyboard" { ui.insert(name) }
             }
-            if let name = matchLproj(language, in: names), name != baseName, let dir = dirs[name] {
-                source = name
-                entries.merge(readTable(in: dir)) { _, new in new }
-            }
-            entries = entries.filter { !isEmpty($0.value) }
-            if !entries.isEmpty { result.append(LanguageEntries(language: language, source: source, entries: entries)) }
         }
-        return result
+        let tables = names.subtracting(excludedTables).subtracting(ui).sorted { a, b in
+            if a == "Localizable" { return b != "Localizable" }
+            if b == "Localizable" { return false }
+            return a < b
+        }
+        return BundleTables(root: root, lprojs: lprojs, tables: tables, uiTables: ui)
+    }
+
+    // MARK: Collection
+
+    /// Where a group of values came from.
+    struct TableOrigin: Equatable {
+        /// Bundle folder name (`MyApp.app`, `Feature_Feature.bundle`, `Kit.framework`).
+        var bundle: String
+        var table: String
+        /// Keys this table contributed after precedence (first occurrence wins).
+        var count: Int
+    }
+
+    /// The same key with a different value in two tables/bundles; the first one was kept.
+    struct Collision: Equatable {
+        var language: String
+        var key: String
+        /// `Bundle/Table` kept and ignored.
+        var kept: String
+        var ignored: String
+    }
+
+    struct ScannedBundle: Equatable {
+        var name: String
+        var path: String
+        var tables: [String]
+    }
+
+    struct Collection: Equatable {
+        /// Base language first (always present), then each other project language with values.
+        var units: [LanguageEntries]
+        var scanned: [ScannedBundle]
+        var collisions: [Collision]
+
+        var isEmpty: Bool { units.allSatisfy { $0.entries.isEmpty } }
+        var totalCount: Int { units.reduce(0) { $0 + $1.entries.count } }
+    }
+
+    /// Everything to upload from `bundle` alone (every table), see `collect(bundles:…)`.
+    static func collect(bundle: Bundle, baseLanguage: String, languages: [String]) -> [LanguageEntries] {
+        collect(bundles: [bundle], baseLanguage: baseLanguage, languages: languages).units
+    }
+
+    /// Everything to upload from `bundles` (pass `AppBundles.discover` order: main bundle first, then
+    /// the others alphabetically): the base values (sent as `baseLanguage`) followed by each other
+    /// project language that has values.
+    ///
+    /// Keys share one flat namespace. The first occurrence wins, in this order: the first bundle's
+    /// `Localizable`, its other tables (alphabetical), then the next bundle's tables in the same order.
+    /// A later occurrence with a different value is recorded as a collision (logged at debug level).
+    ///
+    /// Per bundle, base folder: the `.lproj` matching `baseLanguage`, else the development region's,
+    /// else `Base.lproj`, else unlocalized resources (each file falls back to `Base.lproj` / unlocalized).
+    /// A translation folder that resolves to the base folder (e.g. `en-GB` → `en.lproj`) is skipped.
+    static func collect(bundles: [Bundle], baseLanguage: String, languages: [String]) -> Collection {
+        var order: [String] = [baseLanguage]
+        var seenLanguages = Set([LanguageResolver.normalize(baseLanguage)])
+        for l in languages where seenLanguages.insert(LanguageResolver.normalize(l)).inserted { order.append(l) }
+
+        var merged: [String: [String: TranslationValue]] = [:]
+        var originOfKey: [String: [String: String]] = [:]
+        var sources: [String: String] = [:]
+        var origins: [String: [TableOrigin]] = [:]
+        var collisions: [Collision] = []
+        var scanned: [ScannedBundle] = []
+
+        func absorb(_ language: String, _ values: [String: TranslationValue], bundle: String, table: String, source: String?) {
+            var added = 0
+            for key in values.keys.sorted() {
+                let value = values[key]!
+                if let existing = merged[language]?[key] {
+                    if existing != value {
+                        collisions.append(Collision(language: language, key: key,
+                                                    kept: originOfKey[language]?[key] ?? "?", ignored: "\(bundle)/\(table)"))
+                    }
+                    continue
+                }
+                merged[language, default: [:]][key] = value
+                originOfKey[language, default: [:]][key] = "\(bundle)/\(table)"
+                added += 1
+            }
+            if added > 0 {
+                origins[language, default: []].append(TableOrigin(bundle: bundle, table: table, count: added))
+                if sources[language] == nil, let s = source { sources[language] = s }
+            }
+        }
+
+        for bundle in bundles {
+            let info = tables(in: bundle)
+            let bundleName = bundle.bundleURL.lastPathComponent
+            scanned.append(ScannedBundle(name: bundleName, path: bundle.bundlePath, tables: info.tables))
+            let names = info.lprojs.keys.sorted()
+            let baseLproj = names.first { $0.caseInsensitiveCompare("Base") == .orderedSame }
+            let devRegion = bundle.developmentLocalization.flatMap { $0 == "Base" ? nil : $0 }
+            let baseName = matchLproj(baseLanguage, in: names) ?? devRegion.flatMap { matchLproj($0, in: names) } ?? baseLproj
+            if bundles.first === bundle, sources[baseLanguage] == nil, let b = baseName { sources[baseLanguage] = b }
+            let baseDirs = [baseName.flatMap { info.lprojs[$0] }, baseLproj.flatMap { info.lprojs[$0] }, info.root].compactMap { $0 }
+
+            for table in info.tables {
+                let catalog = (baseDirs + [info.root]).lazy
+                    .map { $0.appendingPathComponent("\(table).xcstrings") }
+                    .first { FileManager.default.fileExists(atPath: $0.path) }
+                    .flatMap { try? Data(contentsOf: $0) }
+
+                // Base values.
+                var base: [String: TranslationValue] = [:]
+                if let data = catalog { base.merge(parseXCStrings(data, language: baseLanguage).entries) { _, new in new } }
+                for ext in ["strings", "stringsdict"] {
+                    let file = "\(table).\(ext)"
+                    guard let dir = baseDirs.first(where: { FileManager.default.fileExists(atPath: $0.appendingPathComponent(file).path) }),
+                          let dict = NSDictionary(contentsOf: dir.appendingPathComponent(file)) as? [String: Any] else { continue }
+                    base.merge(ext == "stringsdict" ? parseStringsDict(dict) : parseStrings(dict)) { _, new in new }
+                }
+                absorb(baseLanguage, base, bundle: bundleName, table: table, source: baseName)
+
+                // Existing translations.
+                for language in order.dropFirst() {
+                    var entries: [String: TranslationValue] = [:]
+                    var source: String?
+                    if let data = catalog { entries.merge(parseXCStrings(data, localization: language)) { _, new in new } }
+                    if let name = matchLproj(language, in: names), name != baseName, let dir = info.lprojs[name] {
+                        source = name
+                        entries.merge(readTable(table, in: dir)) { _, new in new }
+                    }
+                    absorb(language, entries.filter { !isEmpty($0.value) }, bundle: bundleName, table: table, source: source)
+                }
+            }
+        }
+
+        for c in collisions {
+            Log.debug("key '\(c.key)' (\(c.language)) in \(c.ignored) differs from \(c.kept); keeping \(c.kept)")
+        }
+        var units = [LanguageEntries(language: baseLanguage, source: sources[baseLanguage],
+                                     entries: merged[baseLanguage] ?? [:], origins: origins[baseLanguage] ?? [])]
+        for language in order.dropFirst() {
+            guard let entries = merged[language], !entries.isEmpty else { continue }
+            units.append(LanguageEntries(language: language, source: sources[language], entries: entries,
+                                         origins: origins[language] ?? []))
+        }
+        return Collection(units: units, scanned: scanned, collisions: collisions)
     }
 
     private static func isEmpty(_ value: TranslationValue) -> Bool {

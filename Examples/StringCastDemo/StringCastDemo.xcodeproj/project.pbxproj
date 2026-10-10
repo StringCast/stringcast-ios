@@ -12,6 +12,7 @@
 		A10000000000000000000003 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000001 /* Localizable.strings */; };
 		A10000000000000000000004 /* Localizable.stringsdict in Resources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000002 /* Localizable.stringsdict */; };
 		A10000000000000000000005 /* StringCast in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000001 /* StringCast */; };
+		A10000000000000000000006 /* DemoFeature in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000002 /* DemoFeature */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +30,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000005 /* StringCast in Frameworks */,
+				A10000000000000000000006 /* DemoFeature in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -81,6 +83,7 @@
 			name = StringCastDemo;
 			packageProductDependencies = (
 				AA0000000000000000000001 /* StringCast */,
+				AA0000000000000000000002 /* DemoFeature */,
 			);
 			productName = StringCastDemo;
 			productReference = A20000000000000000000006 /* StringCastDemo.app */;
@@ -109,6 +112,7 @@
 			mainGroup = A50000000000000000000001;
 			packageReferences = (
 				AB0000000000000000000001 /* XCLocalSwiftPackageReference "../.." */,
+				AB0000000000000000000002 /* XCLocalSwiftPackageReference "DemoFeature" */,
 			);
 			productRefGroup = A50000000000000000000003 /* Products */;
 			projectDirPath = "";
@@ -204,6 +208,23 @@
 			};
 			name = Release;
 		};
+		A90000000000000000000013 /* QA */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = QA;
+		};
 		A90000000000000000000021 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -256,6 +277,32 @@
 			};
 			name = Release;
 		};
+		A90000000000000000000023 /* QA */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = StringCastDemo/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "StringCast Demo";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.stringcast.demo;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = QA;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -264,6 +311,7 @@
 			buildConfigurations = (
 				A90000000000000000000011 /* Debug */,
 				A90000000000000000000012 /* Release */,
+				A90000000000000000000013 /* QA */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -273,6 +321,7 @@
 			buildConfigurations = (
 				A90000000000000000000021 /* Debug */,
 				A90000000000000000000022 /* Release */,
+				A90000000000000000000023 /* QA */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -284,6 +333,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../..;
 		};
+		AB0000000000000000000002 /* XCLocalSwiftPackageReference "DemoFeature" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = DemoFeature;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -291,6 +344,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = AB0000000000000000000001 /* XCLocalSwiftPackageReference "../.." */;
 			productName = StringCast;
+		};
+		AA0000000000000000000002 /* DemoFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AB0000000000000000000002 /* XCLocalSwiftPackageReference "DemoFeature" */;
+			productName = DemoFeature;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

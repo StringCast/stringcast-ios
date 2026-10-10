@@ -1,6 +1,6 @@
 import Foundation
 
-/// Looks up the app's own compiled string (Localizable table). Returns nil when absent.
+/// Looks up the app's own compiled string (`Bundle.main`'s Localizable table). Returns nil when absent.
 typealias AppStringsProvider = (_ key: String) -> String?
 
 /// Core runtime. All public entry points are thread-safe; lookups take one short lock.
@@ -19,7 +19,7 @@ final class StringCastEngine {
     private let appStrings: AppStringsProvider
     private let preferredLanguages: () -> [String]
     private let now: () -> Date
-    /// Bundle whose `Localizable` table is uploaded in draft mode (`Bundle.main` in apps).
+    /// App bundle whose tables (and those of every bundle inside it) are uploaded in draft mode (`Bundle.main` in apps).
     let localBundle: Bundle
     private let defaults: UserDefaults
     private var autoUploadTask: Task<Void, Never>?
@@ -213,8 +213,10 @@ final class StringCastEngine {
         return nil
     }
 
-    /// Used by the swizzled `Bundle.main`: OTA string for a Localizable-table key, else nil
+    /// Used by the bundle interception (any app bundle, any table): OTA string for `key`, else nil
     /// (plural values return nil so the compiled `.stringsdict` keeps working with `String(format:)`).
+    /// In draft mode a key absent from the base bundle is reported with `original()`, the compiled value
+    /// of the bundle/table that was asked.
     func bundleLookup(_ key: String, original: () -> String?) -> String? {
         for bundle in otaBundles() {
             guard let value = bundle.value(for: key) else { continue }
@@ -339,24 +341,64 @@ final class StringCastEngine {
         return total
     }
 
-    /// Uploads `bundle`'s base values and existing translations for every project language (one language
-    /// per request). Without a known manifest only the development-region values are sent.
-    func uploadLocalStrings(bundle: Bundle) async throws -> UploadResult {
-        let units: [LocalStringsReader.LanguageEntries]
+    /// Reads every table of `root` and of every bundle inside it (`AppBundles.discover`): base values plus
+    /// existing translations for every project language, `excludedKeys` removed. Without a known manifest
+    /// only the development-region values are collected.
+    func collectLocalStrings(root: Bundle) -> LocalStringsReader.Collection {
+        let bundles = AppBundles.discover(root: root)
+        var collection: LocalStringsReader.Collection
         if let manifest = snapshot.cached?.manifest {
-            units = LocalStringsReader.collect(bundle: bundle, baseLanguage: manifest.baseLanguage,
-                                               languages: manifest.languages.map(\.code))
+            collection = LocalStringsReader.collect(bundles: bundles, baseLanguage: manifest.baseLanguage,
+                                                    languages: manifest.languages.map(\.code))
         } else {
-            let local = LocalStringsReader.read(bundle: bundle, fallbackLanguage: nil)
-            units = [.init(language: local.language, source: nil, entries: local.entries)]
+            let dev = root.developmentLocalization.flatMap { $0 == "Base" ? nil : $0 } ?? "en"
+            collection = LocalStringsReader.collect(bundles: bundles, baseLanguage: dev, languages: [])
         }
+        if !config.excludedKeys.isEmpty {
+            for i in collection.units.indices {
+                collection.units[i].entries = collection.units[i].entries.filter { !config.excludedKeys.contains($0.key) }
+            }
+        }
+        return collection
+    }
+
+    /// Uploads a collection, one language per request. Throws on the first failed batch.
+    func upload(_ collection: LocalStringsReader.Collection) async throws -> UploadResult {
         var total = UploadResult(created: 0, filled: 0, ignored: 0)
-        for unit in units where !unit.entries.isEmpty {
+        for unit in collection.units where !unit.entries.isEmpty {
             let r = try await upload(unit.entries, language: unit.language)
-            Log.debug("uploaded \(unit.entries.count) \(unit.language) strings from \(unit.source.map { "\($0).lproj" } ?? "bundle") (created \(r.created), filled \(r.filled), ignored \(r.ignored))")
+            Log.debug("uploaded \(unit.entries.count) \(unit.language) strings from \(Self.describe(unit.origins)) (created \(r.created), filled \(r.filled), ignored \(r.ignored))")
             total = total + r
         }
         return total
+    }
+
+    /// Uploads the base values and existing translations of `bundle` and every bundle inside it.
+    func uploadLocalStrings(bundle: Bundle) async throws -> UploadResult {
+        try await upload(collectLocalStrings(root: bundle))
+    }
+
+    static func describe(_ origins: [LocalStringsReader.TableOrigin]) -> String {
+        origins.isEmpty ? "nothing" : origins.map { "\($0.bundle)/\($0.table) \($0.count)" }.joined(separator: ", ")
+    }
+
+    /// Where the reader looked, for the "nothing found" warning.
+    static func emptyCollectionMessage(_ c: LocalStringsReader.Collection, marker: String) -> String {
+        let looked = c.scanned.map { "\($0.path) [\($0.tables.isEmpty ? "no tables" : "tables: " + $0.tables.joined(separator: ", "))]" }
+        let language = c.units.first?.language ?? "?"
+        return "auto-upload found no local strings for base language '\(language)' (build \(marker)); nothing was uploaded "
+            + "and it will retry on the next launch. Looked in \(c.scanned.count) bundle(s): \(looked.joined(separator: "; ")). "
+            + "Check that your .strings/.stringsdict/.xcstrings files are in the app target's Copy Bundle Resources or in a "
+            + "Swift package's resources, and that an .lproj matches the project's base language or the bundle's development region."
+    }
+
+    static func uploadSummary(_ c: LocalStringsReader.Collection, result r: UploadResult, marker: String) -> String {
+        let bundles = Set(c.units.flatMap { $0.origins.map(\.bundle) })
+        let tables = Set(c.units.flatMap { $0.origins.map { "\($0.bundle)/\($0.table)" } })
+        let perLanguage = c.units.filter { !$0.entries.isEmpty }.map { "\($0.language) \($0.entries.count)" }.joined(separator: ", ")
+        let base = c.units.first.map { describe($0.origins) } ?? "nothing"
+        return "uploaded local strings for build \(marker): \(bundles.count) bundle(s), \(tables.count) table(s); keys per language: "
+            + "\(perLanguage); base from \(base); created \(r.created), filled \(r.filled), ignored \(r.ignored)"
     }
 
     /// `CFBundleShortVersionString|CFBundleVersion|sdkVersion` of the uploaded bundle.
@@ -370,7 +412,8 @@ final class StringCastEngine {
 
     /// Draft mode: uploads base values + translations once per app build. Needs a manifest (cache or a
     /// successful fetch); otherwise it retries on the next launch. The marker is stored only after every
-    /// batch succeeded. Never throws.
+    /// batch succeeded AND at least one string was found (an empty run logs a warning and retries).
+    /// Never throws.
     func autoUploadIfNeeded() async {
         guard config.draftMode, config.autoUploadLocalStrings else { return }
         let task: Task<Void, Never> = lock.locked {
@@ -390,13 +433,19 @@ final class StringCastEngine {
         }
         // `start` runs this after the first refresh, so a manifest is either cached or was just fetched.
         guard snapshot.cached != nil else {
-            Log.debug("auto-upload postponed: no manifest yet (will retry next launch)")
+            Log.warn("auto-upload postponed: no project manifest yet (offline, wrong projectId/sdkKey or baseURL?); will retry on the next launch")
+            return
+        }
+        let collection = collectLocalStrings(root: localBundle)
+        guard !collection.isEmpty else {
+            // Never mark an empty run as done: a misconfigured or not-yet-bundled build must retry.
+            Log.warn(Self.emptyCollectionMessage(collection, marker: marker))
             return
         }
         do {
-            let r = try await uploadLocalStrings(bundle: localBundle)
+            let r = try await upload(collection)
             defaults.set(marker, forKey: autoUploadMarkerKey)
-            Log.debug("auto-upload done for build \(marker): created \(r.created), filled \(r.filled), ignored \(r.ignored)")
+            Log.notice(Self.uploadSummary(collection, result: r, marker: marker))
         } catch {
             Log.warn("auto-upload of local strings failed (will retry next launch): \(error)")
         }

@@ -1,0 +1,5 @@
+/* Feature screen title */
+"feature_title" = "Título de la función (compilado, es)";
+
+/* Feature screen body */
+"feature_body" = "Este texto vive en la tabla Feature del paquete DemoFeature.";
