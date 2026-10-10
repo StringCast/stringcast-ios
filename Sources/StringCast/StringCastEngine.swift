@@ -19,6 +19,10 @@ final class StringCastEngine {
     private let appStrings: AppStringsProvider
     private let preferredLanguages: () -> [String]
     private let now: () -> Date
+    /// Bundle whose `Localizable` table is uploaded in draft mode (`Bundle.main` in apps).
+    let localBundle: Bundle
+    private let defaults: UserDefaults
+    private var autoUploadTask: Task<Void, Never>?
     /// Called (on an arbitrary thread) after translations visible to lookups changed.
     var onChange: ((Snapshot) -> Void)?
 
@@ -35,8 +39,12 @@ final class StringCastEngine {
         appStrings: @escaping AppStringsProvider,
         preferredLanguages: @escaping () -> [String] = { Locale.preferredLanguages },
         now: @escaping () -> Date = Date.init,
-        appInfo: CheckInHeaders.AppInfo = .from(.main)
+        appInfo: CheckInHeaders.AppInfo = .from(.main),
+        localBundle: Bundle = .main,
+        defaults: UserDefaults = .standard
     ) {
+        self.localBundle = localBundle
+        self.defaults = defaults
         self.config = config
         self.store = store
         self.api = APIClient(baseURL: config.baseURL, projectId: config.projectId, sdkKey: config.sdkKey, transport: transport)
@@ -50,7 +58,7 @@ final class StringCastEngine {
         self.api.checkInHeaders = { [weak self] in self?.checkInHeaders() ?? fallbackHeaders }
         loadFromCache()
         if config.draftMode {
-            reporter = MissingKeyReporter(api: api, debounce: config.missingKeyDebounce) { [weak self] in
+            reporter = MissingKeyReporter(api: api, debounce: config.missingKeyDebounce, excludedKeys: config.excludedKeys) { [weak self] in
                 self?.reporterContext()
             }
         }
@@ -317,20 +325,80 @@ final class StringCastEngine {
 
     // MARK: - Upload
 
+    /// Posts `entries` for one language in batches of ≤ 500 (`excludedKeys` removed). Throws on the first failed batch.
     func upload(_ entries: [String: TranslationValue], language: String) async throws -> UploadResult {
-        var total = UploadResult(created: 0, ignored: 0)
-        let keys = entries.keys.sorted()
+        var total = UploadResult(created: 0, filled: 0, ignored: 0)
+        let keys = entries.keys.filter { !config.excludedKeys.contains($0) }.sorted()
         var index = 0
         while index < keys.count {
             let chunk = keys[index..<min(index + MissingKeyReporter.maxBatch, keys.count)]
             let payload = MissingKeyPayload(language: language, keys: chunk.map { .init(key: $0, value: entries[$0]!) })
-            let r = try await api.reportMissing(payload)
-            total.created += r.created
-            total.ignored += r.ignored
+            total = total + (try await api.reportMissing(payload))
             index += MissingKeyReporter.maxBatch
         }
         return total
     }
 
-    var baseLanguageHint: String? { snapshot.cached?.manifest.baseLanguage }
+    /// Uploads `bundle`'s base values and existing translations for every project language (one language
+    /// per request). Without a known manifest only the development-region values are sent.
+    func uploadLocalStrings(bundle: Bundle) async throws -> UploadResult {
+        let units: [LocalStringsReader.LanguageEntries]
+        if let manifest = snapshot.cached?.manifest {
+            units = LocalStringsReader.collect(bundle: bundle, baseLanguage: manifest.baseLanguage,
+                                               languages: manifest.languages.map(\.code))
+        } else {
+            let local = LocalStringsReader.read(bundle: bundle, fallbackLanguage: nil)
+            units = [.init(language: local.language, source: nil, entries: local.entries)]
+        }
+        var total = UploadResult(created: 0, filled: 0, ignored: 0)
+        for unit in units where !unit.entries.isEmpty {
+            let r = try await upload(unit.entries, language: unit.language)
+            Log.debug("uploaded \(unit.entries.count) \(unit.language) strings from \(unit.source.map { "\($0).lproj" } ?? "bundle") (created \(r.created), filled \(r.filled), ignored \(r.ignored))")
+            total = total + r
+        }
+        return total
+    }
+
+    /// `CFBundleShortVersionString|CFBundleVersion|sdkVersion` of the uploaded bundle.
+    static func buildMarker(for bundle: Bundle) -> String {
+        let short = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        return "\(short)|\(build)|\(StringCast.sdkVersion)"
+    }
+
+    var autoUploadMarkerKey: String { "app.stringcast.\(config.projectId).autoUploadMarker" }
+
+    /// Draft mode: uploads base values + translations once per app build. Needs a manifest (cache or a
+    /// successful fetch); otherwise it retries on the next launch. The marker is stored only after every
+    /// batch succeeded. Never throws.
+    func autoUploadIfNeeded() async {
+        guard config.draftMode, config.autoUploadLocalStrings else { return }
+        let task: Task<Void, Never> = lock.locked {
+            if let running = autoUploadTask { return running }
+            let t = Task { await self.performAutoUpload() }
+            autoUploadTask = t
+            return t
+        }
+        await task.value
+    }
+
+    private func performAutoUpload() async {
+        let marker = Self.buildMarker(for: localBundle)
+        if defaults.string(forKey: autoUploadMarkerKey) == marker {
+            Log.debug("local strings already uploaded for build \(marker)")
+            return
+        }
+        // `start` runs this after the first refresh, so a manifest is either cached or was just fetched.
+        guard snapshot.cached != nil else {
+            Log.debug("auto-upload postponed: no manifest yet (will retry next launch)")
+            return
+        }
+        do {
+            let r = try await uploadLocalStrings(bundle: localBundle)
+            defaults.set(marker, forKey: autoUploadMarkerKey)
+            Log.debug("auto-upload done for build \(marker): created \(r.created), filled \(r.filled), ignored \(r.ignored)")
+        } catch {
+            Log.warn("auto-upload of local strings failed (will retry next launch): \(error)")
+        }
+    }
 }

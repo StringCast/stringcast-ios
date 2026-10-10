@@ -48,7 +48,7 @@ final class CheckInHeadersTests: XCTestCase {
         let sparse = CheckInHeaders.build(app: .init(appId: nil, appVersion: "βé"), language: "")
         XCTAssertEqual(Set(sparse.keys), ["X-StringCast-Platform", "X-StringCast-SDK-Version"])
         XCTAssertEqual(CheckInHeaders.asciiSafe(" 1.0 (β)\r\n"), "1.0 ()")
-        XCTAssertEqual(StringCast.sdkVersion, "0.1.0")
+        XCTAssertEqual(StringCast.sdkVersion, "0.1.1")
         XCTAssertEqual(StringCastConfig.defaultBaseURL.absoluteString, "https://console.stringcast.app")
     }
 

@@ -2,7 +2,7 @@ import Foundation
 
 extension StringCast {
     /// SDK version, sent as `X-StringCast-SDK-Version` (contract §4.2).
-    public static let sdkVersion = "0.1.0"
+    public static let sdkVersion = "0.1.1"
 }
 
 /// Check-in headers (contract §4.2), sent on `/manifest` and `/missing` only — never on bundle

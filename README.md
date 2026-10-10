@@ -13,12 +13,12 @@ Full guide: https://console.stringcast.app/docs/ios
 ## Install (Swift Package Manager)
 
 Xcode → *File › Add Package Dependencies…* → enter `https://github.com/stringcast/stringcast-ios`,
-choose *Up to Next Major Version* from `0.1.0`, then add the **StringCast** library to your app target.
+choose *Up to Next Major Version* from `0.1.1`, then add the **StringCast** library to your app target.
 
 `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/stringcast/stringcast-ios", from: "0.1.0"),
+.package(url: "https://github.com/stringcast/stringcast-ios", from: "0.1.1"),
 ...
 .target(name: "MyApp", dependencies: [.product(name: "StringCast", package: "stringcast-ios")])
 ```
@@ -51,7 +51,9 @@ StringCast.start(StringCastConfig(
     refreshOnForeground: true,      // re-check on willEnterForeground (honours refreshInterval)
     missingKeyDebounce: 5,
     loggingEnabled: nil,            // defaults to draftMode
-    cacheDirectory: nil             // defaults to Application Support
+    cacheDirectory: nil,            // defaults to Application Support
+    autoUploadLocalStrings: true,   // draft mode: upload all local strings once per build
+    excludedKeys: []                // keys never uploaded / reported
 ))
 ```
 
@@ -170,18 +172,39 @@ Draft mode defaults to `true` in DEBUG builds. SPM compiles the package with you
 your Debug/Release setting. **Never enable it in App Store builds.** The SDK key is public, but there is no reason
 to let production clients create keys.
 
+- **Automatic full upload (once per build):** after `start`, in the background, the SDK uploads all of your
+  app's strings to `POST /v1/sdk/<id>/missing`, so the portal has every key (and your existing translations)
+  after the first debug run, not only the keys you happened to look up:
+  1. **Base values:** everything in `Bundle.main`'s `Localizable` table for the project's base language
+     (`Localizable.strings`, text or compiled; `Localizable.stringsdict`; String Catalogs, which Xcode compiles
+     into those files). The `.lproj` matching the project's `baseLanguage` is used, else your development region's.
+  2. **Existing translations:** for every other project language, the matching `.lproj` (`es-MX.lproj`, else
+     `es.lproj`; case-insensitive, `_` = `-`; `zh-Hans.lproj` or legacy `zh_CN.lproj`) is uploaded as that language.
+
+  One language per request, batches of 500. The server creates keys that don't exist and fills values that are
+  empty in that language. **It never overwrites a value**, so edits made in the portal are safe. It runs once
+  per app build: the marker is `CFBundleShortVersionString|CFBundleVersion|StringCast.sdkVersion`, stored in
+  `UserDefaults` per project, and only saved after every batch succeeded. It waits for the project manifest
+  (cached or fetched at start); if there is none (offline, wrong key), it tries again on the next launch.
+  Only `Bundle.main`'s `Localizable` table is uploaded. Other tables (`InfoPlist`, storyboard tables) and the
+  strings of frameworks and Swift packages are never included. Turn it off with
+  `StringCastConfig(autoUploadLocalStrings: false)`.
+
+  To **force a re-upload** of the same build, delete the app from the simulator/device (clears the marker), bump
+  the build number, or call `uploadLocalStrings()` (below).
+- **Excluding keys:** `StringCastConfig(excludedKeys: ["debug_menu_title", …])` keys are never uploaded and
+  never reported as missing.
 - **Missing keys:** a key you look up at runtime that isn't in the base bundle, and that has a local value
   (compiled string or `default:`), is reported to `POST /v1/sdk/<id>/missing`. Reports are debounced
   (5 s), batched (≤ 500) and sent once per key per launch. Existing keys are never overwritten.
-- **Upload everything:**
+- **Upload on demand:**
 
   ```swift
-  let result = try await StringCast.uploadLocalStrings()   // created / ignored counts
+  let result = try await StringCast.uploadLocalStrings()   // created / filled / ignored, summed over all requests
   ```
 
-  This reads `Localizable.strings` (text or compiled), `Localizable.stringsdict` and `Localizable.xcstrings` (if
-  bundled) from `Bundle.main`'s development-region `.lproj`, then posts the base values in batches of 500.
-  String Catalogs are compiled into `.strings`/`.stringsdict` at build time, so those are what the SDK finds in the app.
+  Same upload as the automatic one (base values + existing translations), but it ignores the once-per-build
+  marker. `filled` is 0 when talking to a server that doesn't report it.
 
 ## Uploading strings from an Xcode build phase (CLI)
 
@@ -212,7 +235,7 @@ headers, so the portal can show which apps are connected (contract §4.2):
 | `X-StringCast-Platform` | `ios` |
 | `X-StringCast-App-Id` | your bundle ID (`Bundle.main.bundleIdentifier`) |
 | `X-StringCast-App-Version` | `CFBundleShortVersionString` |
-| `X-StringCast-SDK-Version` | `StringCast.sdkVersion`, e.g. `0.1.0` |
+| `X-StringCast-SDK-Version` | `StringCast.sdkVersion`, e.g. `0.1.1` |
 | `X-StringCast-Language` | the language the SDK resolved for this device, e.g. `es` (omitted until known) |
 
 No device IDs (IDFA/IDFV), user identifiers or other personal data are sent. Empty values are omitted and values are
@@ -243,7 +266,7 @@ xcodebuild -project Examples/StringCastDemo/StringCastDemo.xcodeproj -scheme Str
 
 ```sh
 swift build
-swift test          # 49 XCTest cases (resolution, placeholders, decoding, plurals, engine, refresh, swizzle, check-in headers)
+swift test          # 60 XCTest cases (resolution, placeholders, decoding, plurals, engine, refresh, swizzle, check-in headers, auto-upload)
 STRINGCAST_LIVE=1 swift test --filter LiveBackendTests   # read-only smoke test against localhost:8787
 xcodebuild -scheme StringCast -destination 'generic/platform=iOS Simulator' build
 ```

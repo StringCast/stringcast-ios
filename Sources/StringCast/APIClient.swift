@@ -57,13 +57,37 @@ struct MissingKeyPayload: Encodable {
     var keys: [Entry]
 }
 
+/// Counts returned by `POST /missing` (summed over batches/languages for `uploadLocalStrings`).
 public struct UploadResult: Decodable, Equatable {
+    /// Keys that didn't exist and were created.
     public var created: Int
+    /// Existing keys whose empty value in the request's language was filled (0 from servers before 0.1.1's contract).
+    public var filled: Int
+    /// Keys left untouched (value already present, excluded, …).
     public var ignored: Int
 
     public init(created: Int, ignored: Int) {
+        self.init(created: created, filled: 0, ignored: ignored)
+    }
+
+    public init(created: Int, filled: Int, ignored: Int) {
         self.created = created
+        self.filled = filled
         self.ignored = ignored
+    }
+
+    private enum CodingKeys: String, CodingKey { case created, filled, ignored }
+
+    /// Tolerant: missing fields (e.g. `filled` from older servers) count as 0.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        created = (try? c.decodeIfPresent(Int.self, forKey: .created)) ?? 0
+        filled = (try? c.decodeIfPresent(Int.self, forKey: .filled)) ?? 0
+        ignored = (try? c.decodeIfPresent(Int.self, forKey: .ignored)) ?? 0
+    }
+
+    static func + (a: UploadResult, b: UploadResult) -> UploadResult {
+        UploadResult(created: a.created + b.created, filled: a.filled + b.filled, ignored: a.ignored + b.ignored)
     }
 }
 

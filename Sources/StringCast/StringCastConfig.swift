@@ -36,6 +36,11 @@ public struct StringCastConfig {
     public var loggingEnabled: Bool
     /// Override the cache root (defaults to Application Support). `StringCast/<projectId>/` is appended.
     public var cacheDirectory: URL?
+    /// Draft mode only: once per app build (version + build number + SDK version), upload every key of
+    /// `Bundle.main`'s `Localizable` table plus the existing translations of each project language.
+    public var autoUploadLocalStrings: Bool
+    /// Keys never uploaded or reported as missing (e.g. debug-only or generated keys).
+    public var excludedKeys: Set<String>
 
     public init(
         projectId: String,
@@ -48,7 +53,9 @@ public struct StringCastConfig {
         refreshOnForeground: Bool = true,
         missingKeyDebounce: TimeInterval = 5,
         loggingEnabled: Bool? = nil,
-        cacheDirectory: URL? = nil
+        cacheDirectory: URL? = nil,
+        autoUploadLocalStrings: Bool = true,
+        excludedKeys: Set<String> = []
     ) {
         self.projectId = projectId
         self.sdkKey = sdkKey
@@ -61,6 +68,8 @@ public struct StringCastConfig {
         self.missingKeyDebounce = missingKeyDebounce
         self.loggingEnabled = loggingEnabled ?? draftMode
         self.cacheDirectory = cacheDirectory
+        self.autoUploadLocalStrings = autoUploadLocalStrings
+        self.excludedKeys = excludedKeys
     }
 }
 

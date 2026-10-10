@@ -60,7 +60,10 @@ public enum StringCast {
         #if canImport(UIKit) && !os(watchOS)
         if config.refreshOnForeground { observeForeground() }
         #endif
-        Task.detached(priority: .utility) { await engine.refresh(force: false) }
+        Task.detached(priority: .utility) {
+            await engine.refresh(force: false)
+            await engine.autoUploadIfNeeded()   // draft mode only; once per app build
+        }
     }
 
     /// Installs an engine (also used by tests).
@@ -154,16 +157,18 @@ public enum StringCast {
         engine?.snapshot.cached?.manifest.languages.map(\.code) ?? []
     }
 
-    /// Draft mode only: uploads every key of the app's base-language Localizable.strings /
-    /// .stringsdict / .xcstrings to `/missing` (creates keys that don't exist; never overwrites).
+    /// Draft mode only: uploads every key of `bundle`'s `Localizable` table (`.strings`, `.stringsdict`,
+    /// compiled String Catalog) as the project's base language, plus the values of every other project
+    /// language found in a matching `.lproj` (`es-MX` → `es-MX.lproj`, else `es.lproj`), one language per
+    /// request in batches of 500. The server creates missing keys and fills empty values; it never
+    /// overwrites. Runs regardless of the once-per-build marker used by the automatic upload.
+    /// Returns the counts summed over all requests.
     @discardableResult
     public static func uploadLocalStrings(from bundle: Bundle = .main) async throws -> UploadResult {
         guard let engine = engine else { throw StringCastError.notStarted }
         guard engine.config.draftMode else { throw StringCastError.draftModeDisabled }
-        let local = LocalStringsReader.read(bundle: bundle, fallbackLanguage: engine.baseLanguageHint)
-        Log.debug("uploading \(local.entries.count) local strings (\(local.language))")
-        guard !local.entries.isEmpty else { return UploadResult(created: 0, ignored: 0) }
-        return try await engine.upload(local.entries, language: local.language)
+        if engine.snapshot.cached == nil { await engine.refresh(force: false) }
+        return try await engine.uploadLocalStrings(bundle: bundle)
     }
 
     // MARK: - Observers

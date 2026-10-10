@@ -13,14 +13,16 @@ final class MissingKeyReporter {
     private let api: APIClient
     private let debounce: TimeInterval
     private let context: () -> Context?
-    private let queue = DispatchQueue(label: "dev.stringcast.missing-keys")
+    private let excludedKeys: Set<String>
+    private let queue = DispatchQueue(label: "app.stringcast.missing-keys")
     private let lock = NSLock()
     private var pending: [String: TranslationValue] = [:]
     private var seen = Set<String>()
     private var scheduled = false
 
-    init(api: APIClient, debounce: TimeInterval, context: @escaping () -> Context?) {
+    init(api: APIClient, debounce: TimeInterval, excludedKeys: Set<String> = [], context: @escaping () -> Context?) {
         self.api = api
+        self.excludedKeys = excludedKeys
         self.debounce = debounce
         self.context = context
     }
@@ -31,6 +33,7 @@ final class MissingKeyReporter {
     }
 
     func record(_ key: String, value: TranslationValue) {
+        guard !excludedKeys.contains(key) else { return }
         lock.lock()
         guard !seen.contains(key) else { lock.unlock(); return }
         seen.insert(key)
@@ -81,7 +84,7 @@ final class MissingKeyReporter {
                 let payload = MissingKeyPayload(language: ctx.language, keys: chunk.map { .init(key: $0, value: batch[$0]!) })
                 do {
                     let r = try await api.reportMissing(payload)
-                    Log.debug("reported \(chunk.count) missing keys (created \(r.created), ignored \(r.ignored))")
+                    Log.debug("reported \(chunk.count) missing keys (created \(r.created), filled \(r.filled), ignored \(r.ignored))")
                 } catch {
                     Log.debug("missing-key report failed: \(error)")
                     // Allow these keys to be reported again on next use.
